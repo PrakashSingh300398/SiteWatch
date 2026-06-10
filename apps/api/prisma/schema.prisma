@@ -1,0 +1,428 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum OrgPlan {
+  starter
+  pro
+  agency
+}
+
+enum UserRole {
+  owner
+  member
+}
+
+enum SiteStatus {
+  up
+  down
+  unknown
+}
+
+enum EventSeverity {
+  info
+  warning
+  critical
+}
+
+enum AlertSeverity {
+  info
+  warning
+  critical
+}
+
+enum VitalsStrategy {
+  mobile
+  desktop
+}
+
+enum AiInsightKind {
+  brief
+  review_draft
+  report_narrative
+  chat
+}
+
+enum GscConnectionStatus {
+  active
+  expired
+  revoked
+}
+
+// ─── Core tables ──────────────────────────────────────────────────────────────
+
+model Organization {
+  id         String   @id @default(uuid())
+  name       String
+  plan       OrgPlan  @default(starter)
+  created_at DateTime @default(now())
+
+  users  User[]
+  sites  Site[]
+  alerts Alert[]
+
+  @@map("organizations")
+}
+
+model User {
+  id               String   @id @default(uuid())
+  org_id           String
+  email            String   @unique
+  password_hash    String
+  role             UserRole @default(member)
+  expo_push_tokens Json     @default("[]")
+  created_at       DateTime @default(now())
+
+  org Organization @relation(fields: [org_id], references: [id], onDelete: Cascade)
+
+  @@map("users")
+}
+
+model Site {
+  id                 String     @id @default(uuid())
+  org_id             String
+  url                String
+  name               String
+  site_key_hash      String?
+  status             SiteStatus @default(unknown)
+  paired_at          DateTime?
+  last_check_at      DateTime?
+  last_health_at     DateTime?
+  wp_version         String?
+  php_version        String?
+  security_score     Int?
+  check_interval_sec Int        @default(300)
+  settings           Json       @default("{}")
+  created_at         DateTime   @default(now())
+
+  org                 Organization      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  uptime_checks       UptimeCheck[]
+  uptime_rollups      UptimeRollup[]
+  ssl_status          SslStatus?
+  events              Event[]
+  plugins             Plugin[]
+  form_monitors       FormMonitor[]
+  alerts              Alert[]
+  known_ips           KnownIp[]
+  web_vitals          WebVitals[]
+  gsc_connection      GscConnection?
+  seo_daily           SeoDaily[]
+  seo_queries         SeoQuery[]
+  seo_index_statuses  SeoIndexStatus[]
+  crawl_pages         CrawlPage[]
+  seo_audit_summaries SeoAuditSummary[]
+  ai_crawler_stats    AiCrawlerStat[]
+  ai_referral_daily   AiReferralDaily[]
+  ai_insights         AiInsight[]
+
+  @@map("sites")
+}
+
+// ─── Uptime ───────────────────────────────────────────────────────────────────
+
+model UptimeCheck {
+  id          String   @id @default(uuid())
+  site_id     String
+  checked_at  DateTime @default(now())
+  ok          Boolean
+  status_code Int?
+  response_ms Int?
+  error       String?
+
+  site Site @relation(fields: [site_id], references: [id], onDelete: Cascade)
+
+  @@index([site_id, checked_at])
+  @@map("uptime_checks")
+}
+
+// Hourly rollups kept for 1 year; raw checks pruned after 30 days
+model UptimeRollup {
+  id           String   @id @default(uuid())
+  site_id      String
+  hour         DateTime
+  checks_total Int      @default(0)
+  checks_ok    Int      @default(0)
+  avg_ms       Float?
+
+  site Site @relation(fields: [site_id], references: [id], onDelete: Cascade)
+
+  @@unique([site_id, hour])
+  @@map("uptime_rollups")
+}
+
+model SslStatus {
+  site_id         String    @id
+  issuer          String?
+  expires_at      DateTime?
+  grade           String?
+  last_checked_at DateTime?
+
+  site Site @relation(fields: [site_id], references: [id], onDelete: Cascade)
+
+  @@map("ssl_statuses")
+}
+
+// ─── Events ───────────────────────────────────────────────────────────────────
+
+model Event {
+  id                  String        @id @default(uuid())
+  site_id             String
+  type                String
+  severity            EventSeverity @default(info)
+  occurred_at         DateTime
+  actor               Json?
+  data                Json?
+  ip                  String?
+  geo                 Json?
+  correlated_event_id String?
+
+  site             Site    @relation(fields: [site_id], references: [id], onDelete: Cascade)
+  correlated_event Event?  @relation("EventCorrelation", fields: [correlated_event_id], references: [id])
+  correlated_by    Event[] @relation("EventCorrelation")
+  alerts           Alert[]
+
+  @@index([site_id, occurred_at])
+  @@index([site_id, severity])
+  @@map("events")
+}
+
+// ─── Plugins & security ───────────────────────────────────────────────────────
+
+model Plugin {
+  id               String   @id @default(uuid())
+  site_id          String
+  slug             String
+  name             String
+  version          String?
+  active           Boolean  @default(false)
+  update_available Boolean  @default(false)
+  new_version      String?
+  vulnerable       Boolean  @default(false)
+  vuln_data        Json?
+  last_seen_at     DateTime @default(now())
+
+  site Site @relation(fields: [site_id], references: [id], onDelete: Cascade)
+
+  @@unique([site_id, slug])
+  @@map("plugins")
+}
+
+model FormMonitor {
+  id             String    @id @default(uuid())
+  site_id        String
+  form_plugin    String
+  form_id        String
+  form_name      String
+  baseline_daily Decimal?
+  count_24h      Int       @default(0)
+  count_7d       Int       @default(0)
+  last_entry_at  DateTime?
+  alert_state    String?
+
+  site Site @relation(fields: [site_id], references: [id], onDelete: Cascade)
+
+  @@unique([site_id, form_plugin, form_id])
+  @@map("form_monitors")
+}
+
+// ─── Alerts ───────────────────────────────────────────────────────────────────
+
+model Alert {
+  id              String        @id @default(uuid())
+  site_id         String
+  org_id          String
+  rule            String
+  severity        AlertSeverity
+  title           String
+  body            String
+  created_at      DateTime      @default(now())
+  acknowledged_at DateTime?
+  resolved_at     DateTime?
+  event_id        String?
+
+  site        Site         @relation(fields: [site_id], references: [id], onDelete: Cascade)
+  org         Organization @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  event       Event?       @relation(fields: [event_id], references: [id])
+  ai_insights AiInsight[]
+
+  @@index([org_id, resolved_at])
+  @@index([site_id, resolved_at])
+  @@map("alerts")
+}
+
+model KnownIp {
+  id         String   @id @default(uuid())
+  site_id    String
+  user_login String
+  ip         String
+  country    String?
+  first_seen DateTime @default(now())
+  last_seen  DateTime @default(now())
+
+  site Site @relation(fields: [site_id], references: [id], onDelete: Cascade)
+
+  @@unique([site_id, user_login, ip])
+  @@map("known_ips")
+}
+
+model WebVitals {
+  id          String         @id @default(uuid())
+  site_id     String
+  measured_at DateTime       @default(now())
+  performance Int?
+  lcp_ms      Float?
+  cls         Float?
+  inp_ms      Float?
+  strategy    VitalsStrategy @default(mobile)
+
+  site Site @relation(fields: [site_id], references: [id], onDelete: Cascade)
+
+  @@index([site_id, measured_at])
+  @@map("web_vitals")
+}
+
+// ─── SEO module (Phase 2 — schema included per spec §6 note) ──────────────────
+
+model GscConnection {
+  id                      String              @id @default(uuid())
+  site_id                 String              @unique
+  google_email            String
+  refresh_token_encrypted String
+  property_url            String
+  connected_at            DateTime            @default(now())
+  status                  GscConnectionStatus @default(active)
+
+  site Site @relation(fields: [site_id], references: [id], onDelete: Cascade)
+
+  @@map("gsc_connections")
+}
+
+model SeoDaily {
+  id           String   @id @default(uuid())
+  site_id      String
+  date         DateTime @db.Date
+  clicks       Int      @default(0)
+  impressions  Int      @default(0)
+  ctr          Float?
+  avg_position Float?
+
+  site Site @relation(fields: [site_id], references: [id], onDelete: Cascade)
+
+  @@unique([site_id, date])
+  @@map("seo_daily")
+}
+
+model SeoQuery {
+  id          String   @id @default(uuid())
+  site_id     String
+  date        DateTime @db.Date
+  query       String
+  clicks      Int      @default(0)
+  impressions Int      @default(0)
+  position    Float?
+  is_priority Boolean  @default(false)
+
+  site Site @relation(fields: [site_id], references: [id], onDelete: Cascade)
+
+  @@unique([site_id, date, query])
+  @@map("seo_queries")
+}
+
+model SeoIndexStatus {
+  id                  String   @id @default(uuid())
+  site_id             String
+  date                DateTime @db.Date
+  indexed_count       Int      @default(0)
+  excluded_noindex    Int      @default(0)
+  crawled_not_indexed Int      @default(0)
+  server_errors       Int      @default(0)
+
+  site Site @relation(fields: [site_id], references: [id], onDelete: Cascade)
+
+  @@unique([site_id, date])
+  @@map("seo_index_statuses")
+}
+
+model CrawlPage {
+  id         String   @id @default(uuid())
+  site_id    String
+  url        String
+  crawled_at DateTime @default(now())
+  title      String?
+  meta_desc  String?
+  canonical  String?
+  robots     String?
+  h1         String?
+  issues     Json?
+
+  site Site @relation(fields: [site_id], references: [id], onDelete: Cascade)
+
+  @@unique([site_id, url])
+  @@map("crawl_pages")
+}
+
+model SeoAuditSummary {
+  id           String   @id @default(uuid())
+  site_id      String
+  crawled_at   DateTime @default(now())
+  score        Int?
+  issue_counts Json?
+
+  site Site @relation(fields: [site_id], references: [id], onDelete: Cascade)
+
+  @@map("seo_audit_summaries")
+}
+
+// ─── AI module (Phase 2/3 — schema included per spec §6 note) ─────────────────
+
+model AiCrawlerStat {
+  id           String   @id @default(uuid())
+  site_id      String
+  date         DateTime @db.Date
+  bot          String
+  hits         Int      @default(0)
+  sample_paths Json?
+
+  site Site @relation(fields: [site_id], references: [id], onDelete: Cascade)
+
+  @@unique([site_id, date, bot])
+  @@map("ai_crawler_stats")
+}
+
+model AiReferralDaily {
+  id       String   @id @default(uuid())
+  site_id  String
+  date     DateTime @db.Date
+  source   String
+  sessions Int      @default(0)
+
+  site Site @relation(fields: [site_id], references: [id], onDelete: Cascade)
+
+  @@unique([site_id, date, source])
+  @@map("ai_referral_daily")
+}
+
+model AiInsight {
+  id                String        @id @default(uuid())
+  site_id           String
+  alert_id          String?
+  kind              AiInsightKind
+  model             String
+  prompt_tokens     Int?
+  completion_tokens Int?
+  content           String
+  created_at        DateTime      @default(now())
+
+  site  Site   @relation(fields: [site_id], references: [id], onDelete: Cascade)
+  alert Alert? @relation(fields: [alert_id], references: [id])
+
+  @@index([site_id, created_at])
+  @@map("ai_insights")
+}

@@ -1,0 +1,27 @@
+import { Queue } from 'bullmq'
+
+// BullMQ bundles its own ioredis. Pass plain connection options to avoid
+// the type mismatch that occurs when passing an external ioredis instance.
+function parseBullConnection(url: string) {
+  try {
+    const u = new URL(url)
+    return {
+      host: u.hostname,
+      port: Number(u.port) || 6379,
+      ...(u.password ? { password: decodeURIComponent(u.password) } : {}),
+      ...(u.pathname && u.pathname !== '/' ? { db: Number(u.pathname.slice(1)) || 0 } : {}),
+      maxRetriesPerRequest: null as null,
+      enableReadyCheck: false,
+    }
+  } catch {
+    return { host: 'localhost', port: 6379, maxRetriesPerRequest: null as null, enableReadyCheck: false }
+  }
+}
+
+export const BULL_CONNECTION = parseBullConnection(
+  process.env.REDIS_URL ?? 'redis://localhost:6379',
+)
+
+export const uptimeQueue = new Queue('uptime', { connection: BULL_CONNECTION })
+export const sslQueue = new Queue('ssl', { connection: BULL_CONNECTION })
+export const schedulerQueue = new Queue('scheduler', { connection: BULL_CONNECTION })
