@@ -22,6 +22,9 @@ export const BULL_CONNECTION = parseBullConnection(
   process.env.REDIS_URL ?? 'redis://localhost:6379',
 )
 
-export const uptimeQueue = new Queue('uptime', { connection: BULL_CONNECTION })
-export const sslQueue = new Queue('ssl', { connection: BULL_CONNECTION })
+export const uptimeQueue    = new Queue('uptime',    { connection: BULL_CONNECTION })
+export const sslQueue       = new Queue('ssl',       { connection: BULL_CONNECTION })
 export const schedulerQueue = new Queue('scheduler', { connection: BULL_CONNECTION })
+export const eventsQueue    = new Queue('events',    { connection: BULL_CONNECTION })
+export const healthQueue    = new Queue('health',    { connection: BULL_CONNECTION })
+export const vulnQueue      = new Queue('vuln',      { connection: BULL_CONNECTION })

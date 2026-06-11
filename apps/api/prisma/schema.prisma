@@ -98,6 +98,7 @@ model Site {
   wp_version         String?
   php_version        String?
   security_score     Int?
+  score_breakdown    Json?
   check_interval_sec Int        @default(300)
   settings           Json       @default("{}")
   created_at         DateTime   @default(now())

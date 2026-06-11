@@ -1,6 +1,6 @@
 import { Worker } from 'bullmq'
 import { prisma } from '../lib/prisma'
-import { uptimeQueue, sslQueue, schedulerQueue, BULL_CONNECTION } from '../lib/queue'
+import { uptimeQueue, sslQueue, schedulerQueue, healthQueue, BULL_CONNECTION } from '../lib/queue'
 
 export async function startScheduler() {
   // Register the repeatable trigger — idempotent on restart
@@ -23,6 +23,7 @@ export async function startScheduler() {
           id: true,
           check_interval_sec: true,
           last_check_at: true,
+          last_health_at: true,
           ssl_status: { select: { last_checked_at: true } },
         },
       })
@@ -32,7 +33,6 @@ export async function startScheduler() {
         const intervalMs = site.check_interval_sec * 1000
         const lastMs = site.last_check_at?.getTime() ?? 0
         if (now - lastMs >= intervalMs) {
-          // jobId bucketed by time-slot → deduplicates within the same interval window
           const slot = Math.floor(now / intervalMs)
           await uptimeQueue.add(
             'uptime.check',
@@ -48,6 +48,18 @@ export async function startScheduler() {
             'ssl.check',
             { siteId: site.id },
             { jobId: `ssl:${site.id}:${todayStr}` },
+          )
+        }
+
+        // ── Health pull: every 6 hours ─────────────────────────────────────
+        const SIX_HOURS_MS = 6 * 3600 * 1000
+        const lastHealthMs = site.last_health_at?.getTime() ?? 0
+        if (now - lastHealthMs >= SIX_HOURS_MS) {
+          const slot6h = Math.floor(now / SIX_HOURS_MS)
+          await healthQueue.add(
+            'health.pull',
+            { siteId: site.id },
+            { jobId: `health:${site.id}:${slot6h}` },
           )
         }
       }

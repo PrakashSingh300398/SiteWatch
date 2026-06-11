@@ -109,6 +109,7 @@ class SiteWatch_Event_Hooks {
 			array(
 				'user_login' => $user_login,
 				'is_admin'   => user_can( $user, 'manage_options' ),
+				'ip'         => $this->client_ip(),
 			)
 		);
 	}
@@ -117,8 +118,21 @@ class SiteWatch_Event_Hooks {
 		$this->queue->push(
 			'user.login_failed',
 			'info',
-			array( 'username_attempted' => $username )
+			array(
+				'username_attempted' => $username,
+				'ip'                 => $this->client_ip(),
+			)
 		);
+	}
+
+	/** Returns the best available client IP, safe for logging (not trusted for access control). */
+	private function client_ip() {
+		foreach ( array( 'HTTP_CF_CONNECTING_IP', 'HTTP_X_REAL_IP', 'REMOTE_ADDR' ) as $key ) {
+			if ( ! empty( $_SERVER[ $key ] ) ) { // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
+				return sanitize_text_field( wp_unslash( $_SERVER[ $key ] ) ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
+			}
+		}
+		return '';
 	}
 
 	// ── Plugin / theme / core hooks ───────────────────────────────────────────

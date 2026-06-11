@@ -102,6 +102,7 @@ class SiteWatch_Health {
 			'default_admin_exists'   => (bool) get_user_by( 'login', 'admin' ),
 			'xmlrpc_enabled'         => ! has_filter( 'xmlrpc_enabled', '__return_false' ),
 			'user_registration_open' => (bool) get_option( 'users_can_register' ),
+			'default_role'           => (string) get_option( 'default_role', 'subscriber' ),
 		);
 	}
 

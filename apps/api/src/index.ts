@@ -77,9 +77,14 @@ async function main() {
   // ── Graceful shutdown ──────────────────────────────────────────────────────
   const shutdown = async (signal: string) => {
     app.log.info(`Received ${signal}, shutting down`)
-    await workers.uptimeWorker.close()
-    await workers.sslWorker.close()
-    await workers.schedulerWorker.close()
+    await Promise.all([
+      workers.uptimeWorker.close(),
+      workers.sslWorker.close(),
+      workers.schedulerWorker.close(),
+      workers.eventsWorker.close(),
+      workers.healthWorker.close(),
+      workers.vulnWorker.close(),
+    ])
     await app.close()
     await prisma.$disconnect()
     await redis.quit()
