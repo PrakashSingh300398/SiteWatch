@@ -274,4 +274,51 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
     await prisma.site.update({ where: { id: siteId }, data: { last_health_at: new Date() } })
     return reply.send({ ok: true })
   })
+
+  // GET /v1/sites/:id/forms
+  fastify.get('/v1/sites/:id/forms', { preHandler: authenticate }, async (req, reply) => {
+    const { id } = req.params as { id: string }
+    const site = await prisma.site.findFirst({ where: { id, org_id: req.user.orgId }, select: { id: true } })
+    if (!site) return reply.status(404).send({ error: 'Not found' })
+
+    const forms = await prisma.formMonitor.findMany({
+      where: { site_id: id },
+      orderBy: { form_name: 'asc' },
+      select: {
+        id: true,
+        form_plugin: true,
+        form_id: true,
+        form_name: true,
+        count_24h: true,
+        count_7d: true,
+        last_entry_at: true,
+        baseline_daily: true,
+        alert_state: true,
+      },
+    })
+    return reply.send(forms)
+  })
+
+  // GET /v1/sites/:id/vitals
+  fastify.get('/v1/sites/:id/vitals', { preHandler: authenticate }, async (req, reply) => {
+    const { id } = req.params as { id: string }
+    const site = await prisma.site.findFirst({ where: { id, org_id: req.user.orgId }, select: { id: true } })
+    if (!site) return reply.status(404).send({ error: 'Not found' })
+
+    const vitals = await prisma.webVitals.findMany({
+      where: { site_id: id },
+      orderBy: { measured_at: 'desc' },
+      take: 10,
+      select: {
+        id: true,
+        performance: true,
+        lcp_ms: true,
+        cls: true,
+        inp_ms: true,
+        strategy: true,
+        measured_at: true,
+      },
+    })
+    return reply.send(vitals)
+  })
 }

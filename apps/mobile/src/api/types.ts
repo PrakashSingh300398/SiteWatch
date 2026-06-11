@@ -89,3 +89,25 @@ export interface DashboardData {
   ssl: { expiringSoon: number }
   updates: { pending: number }
 }
+
+export interface FormMonitorRecord {
+  id: string
+  form_plugin: 'gravityforms' | 'wpforms' | 'cf7'
+  form_id: string
+  form_name: string
+  count_24h: number
+  count_7d: number
+  last_entry_at: string | null
+  baseline_daily: number | null
+  alert_state: string | null
+}
+
+export interface WebVitalsRecord {
+  id: string
+  performance: number | null
+  lcp_ms: number | null
+  cls: number | null
+  inp_ms: number | null
+  strategy: 'mobile' | 'desktop'
+  measured_at: string
+}

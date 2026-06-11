@@ -14,9 +14,18 @@ interface WpPlugin {
   new_version?: string | null
 }
 
+interface WpForm {
+  plugin: 'gravityforms' | 'wpforms' | 'cf7'
+  form_id: string
+  form_name: string
+  count_24h: number | null
+  count_7d: number | null
+  last_entry_at: string | null
+}
+
 interface HealthSnapshot {
   wp_version?: string
-  wp_update_available?: string | null  // null = no update, string = new version
+  wp_update_available?: string | null
   php_version?: string
   plugins?: WpPlugin[]
   administrators?: Array<{ user_login: string }>
@@ -28,6 +37,7 @@ interface HealthSnapshot {
     user_registration_open?: boolean
     default_role?: string
   }
+  forms?: WpForm[]
 }
 
 export function startHealthWorker() {
@@ -142,6 +152,34 @@ export function startHealthWorker() {
           score_breakdown: breakdown as Prisma.InputJsonValue,
         },
       })
+
+      // ── Upsert form monitors ──────────────────────────────────────────────
+      for (const f of snapshot.forms ?? []) {
+        const count24 = f.count_24h ?? 0
+        const count7  = f.count_7d  ?? 0
+        // baseline_daily: rolling estimate from 7-day window
+        const baseline = count7 > 0 ? count7 / 7 : undefined
+        await prisma.formMonitor.upsert({
+          where: { site_id_form_plugin_form_id: { site_id: siteId, form_plugin: f.plugin, form_id: f.form_id } },
+          create: {
+            site_id:       siteId,
+            form_plugin:   f.plugin,
+            form_id:       f.form_id,
+            form_name:     f.form_name,
+            count_24h:     count24,
+            count_7d:      count7,
+            last_entry_at: f.last_entry_at ? new Date(f.last_entry_at) : null,
+            baseline_daily: baseline,
+          },
+          update: {
+            form_name:     f.form_name,
+            count_24h:     count24,
+            count_7d:      count7,
+            last_entry_at: f.last_entry_at ? new Date(f.last_entry_at) : null,
+            ...(baseline !== undefined && { baseline_daily: baseline }),
+          },
+        })
+      }
 
       // ── Dispatch vuln scan for this site's distinct slugs ─────────────────
       const slugs = (snapshot.plugins ?? []).map(p => p.slug)

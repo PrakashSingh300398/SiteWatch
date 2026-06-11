@@ -11,9 +11,9 @@ import { UptimeChart, ResponseSparkline } from '../../src/components/UptimeChart
 import { ScoreGauge } from '../../src/components/ScoreGauge'
 import { StatusDot } from '../../src/components/StatusDot'
 import { colors, spacing, radius, severityColor } from '../../src/theme'
-import type { SiteDetail, UptimeCheck, SiteEvent, Plugin } from '../../src/api/types'
+import type { SiteDetail, UptimeCheck, SiteEvent, Plugin, FormMonitorRecord, WebVitalsRecord } from '../../src/api/types'
 
-type Tab = 'overview' | 'security'
+type Tab = 'overview' | 'security' | 'forms' | 'vitals'
 
 export default function SiteDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
@@ -49,6 +49,20 @@ export default function SiteDetailScreen() {
     enabled: tab === 'security',
   })
 
+  const { data: formsData, isLoading: formsLoading, refetch: refetchForms } =
+    useQuery({
+      queryKey: ['forms', id],
+      queryFn: () => api<FormMonitorRecord[]>(`/v1/sites/${id}/forms`),
+      enabled: tab === 'forms',
+    })
+
+  const { data: vitalsData, isLoading: vitalsLoading, refetch: refetchVitals } =
+    useQuery({
+      queryKey: ['vitals', id],
+      queryFn: () => api<WebVitalsRecord[]>(`/v1/sites/${id}/vitals`),
+      enabled: tab === 'vitals',
+    })
+
   const site    = siteData?.site
   const checks  = uptimeData?.checks ?? []
   const events  = eventsData?.pages.flatMap(p => p.events) ?? []
@@ -58,7 +72,13 @@ export default function SiteDetailScreen() {
 
   const isRefreshing = siteLoading || uptimeLoading
   const onRefresh = async () => {
-    await Promise.all([refetchSite(), refetchUptime(), tab === 'security' && refetchEvents()])
+    await Promise.all([
+      refetchSite(),
+      refetchUptime(),
+      tab === 'security' && refetchEvents(),
+      tab === 'forms'    && refetchForms(),
+      tab === 'vitals'   && refetchVitals(),
+    ])
   }
 
   if (!site && !siteLoading) {
@@ -96,7 +116,7 @@ export default function SiteDetailScreen() {
 
         {/* Tab bar */}
         <View style={styles.tabBar}>
-          {(['overview', 'security'] as Tab[]).map(t => (
+          {(['overview', 'security', 'forms', 'vitals'] as Tab[]).map(t => (
             <Pressable key={t} style={[styles.tabBtn, tab === t && styles.tabActive]} onPress={() => setTab(t)}>
               <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>
                 {t.charAt(0).toUpperCase() + t.slice(1)}
@@ -184,7 +204,7 @@ export default function SiteDetailScreen() {
               </View>
             )}
           </View>
-        ) : (
+        ) : tab === 'security' ? (
           <View style={styles.content}>
             {/* Security score */}
             <View style={styles.card}>
@@ -228,10 +248,91 @@ export default function SiteDetailScreen() {
               )}
             </View>
           </View>
+        ) : tab === 'forms' ? (
+          <View style={styles.content}>
+            {formsLoading ? (
+              <ActivityIndicator color={colors.accent} style={{ marginTop: spacing.xl }} />
+            ) : !formsData || formsData.length === 0 ? (
+              <View style={styles.card}>
+                <Text style={styles.muted}>No form plugins detected. Install Gravity Forms, WPForms, or CF7 and update the WP plugin.</Text>
+              </View>
+            ) : (
+              formsData.map(form => (
+                <View key={form.id} style={styles.card}>
+                  <View style={styles.cardHeader}>
+                    <Text style={styles.cardTitle} numberOfLines={1}>{form.form_name}</Text>
+                    {form.alert_state === 'stopped' && (
+                      <View style={styles.stoppedChip}>
+                        <Text style={styles.stoppedText}>STOPPED</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={styles.formPlugin}>{PLUGIN_LABELS[form.form_plugin]}</Text>
+                  {[
+                    ['Last 24h', String(form.count_24h)],
+                    ['Last 7d', String(form.count_7d)],
+                    ['Daily baseline', form.baseline_daily != null ? form.baseline_daily.toFixed(1) + '/day' : '—'],
+                    ['Last entry', form.last_entry_at ? new Date(form.last_entry_at).toLocaleString() : 'Never'],
+                  ].map(([label, value]) => (
+                    <View key={label} style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>{label}</Text>
+                      <Text style={[styles.infoValue, label === 'Last entry' && form.alert_state === 'stopped' ? { color: colors.warning } : null]}>{value}</Text>
+                    </View>
+                  ))}
+                </View>
+              ))
+            )}
+          </View>
+        ) : (
+          <View style={styles.content}>
+            {vitalsLoading ? (
+              <ActivityIndicator color={colors.accent} style={{ marginTop: spacing.xl }} />
+            ) : !vitalsData || vitalsData.length === 0 ? (
+              <View style={styles.card}>
+                <Text style={styles.muted}>No Core Web Vitals data yet. Results appear after the weekly scan (requires PSI_API_KEY on the server).</Text>
+              </View>
+            ) : (
+              vitalsData.map((v, i) => (
+                <View key={v.id} style={styles.card}>
+                  <View style={styles.cardHeader}>
+                    <Text style={styles.cardTitle}>{i === 0 ? 'Latest' : new Date(v.measured_at).toLocaleDateString()}</Text>
+                    {v.performance != null && (
+                      <View style={[styles.scoreChip, { backgroundColor: scoreColor(v.performance) }]}>
+                        <Text style={styles.scoreChipText}>{v.performance}</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={styles.formPlugin}>{v.strategy} · {new Date(v.measured_at).toLocaleString()}</Text>
+                  {[
+                    ['LCP', v.lcp_ms != null ? `${(v.lcp_ms / 1000).toFixed(2)}s` : '—'],
+                    ['CLS', v.cls != null ? v.cls.toFixed(3) : '—'],
+                    ['INP', v.inp_ms != null ? `${v.inp_ms}ms` : '—'],
+                  ].map(([label, value]) => (
+                    <View key={label} style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>{label}</Text>
+                      <Text style={styles.infoValue}>{value}</Text>
+                    </View>
+                  ))}
+                </View>
+              ))
+            )}
+          </View>
         )}
       </ScrollView>
     </>
   )
+}
+
+const PLUGIN_LABELS: Record<string, string> = {
+  gravityforms: 'Gravity Forms',
+  wpforms: 'WPForms',
+  cf7: 'Contact Form 7',
+}
+
+function scoreColor(score: number) {
+  if (score >= 90) return '#166534'
+  if (score >= 50) return '#713f12'
+  return '#7f1d1d'
 }
 
 function EventRow({ event }: { event: SiteEvent }) {
@@ -303,4 +404,9 @@ const styles = StyleSheet.create({
   causeText:{ fontSize: 10, color: colors.warning },
   loadMore: { alignItems: 'center', paddingVertical: spacing.md },
   loadMoreText: { color: colors.accent, fontSize: 13 },
+  stoppedChip: { backgroundColor: '#7f1d1d', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 },
+  stoppedText: { fontSize: 10, fontWeight: '700', color: '#fca5a5' },
+  formPlugin: { fontSize: 11, color: colors.muted, marginBottom: 4 },
+  scoreChip:  { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  scoreChipText: { fontSize: 14, fontWeight: '700', color: '#fff' },
 })

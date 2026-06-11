@@ -1,6 +1,6 @@
 import { Worker } from 'bullmq'
 import { prisma } from '../lib/prisma'
-import { uptimeQueue, sslQueue, schedulerQueue, healthQueue, BULL_CONNECTION } from '../lib/queue'
+import { uptimeQueue, sslQueue, schedulerQueue, healthQueue, formsQueue, vitalsQueue, BULL_CONNECTION } from '../lib/queue'
 
 export async function startScheduler() {
   // Register the repeatable trigger — idempotent on restart
@@ -27,6 +27,21 @@ export async function startScheduler() {
           ssl_status: { select: { last_checked_at: true } },
         },
       })
+
+      // ── forms.watch: one global job per hour ───────────────────────────────
+      const ONE_HOUR_MS = 3600 * 1000
+      const formsSlot   = Math.floor(now / ONE_HOUR_MS)
+      await formsQueue.add('forms.watch', {}, { jobId: `forms:watch:${formsSlot}` })
+
+      // ── vitals.fetch: need last measured_at per site ───────────────────────
+      const SEVEN_DAYS_MS = 7 * 24 * 3600 * 1000
+      const lastVitalsRows = await prisma.webVitals.groupBy({
+        by: ['site_id'],
+        _max: { measured_at: true },
+      })
+      const lastVitalsMap = new Map(
+        lastVitalsRows.map(r => [r.site_id, r._max.measured_at?.getTime() ?? 0]),
+      )
 
       for (const site of sites) {
         // ── Uptime: due if never checked or interval elapsed ───────────────
@@ -60,6 +75,17 @@ export async function startScheduler() {
             'health.pull',
             { siteId: site.id },
             { jobId: `health:${site.id}:${slot6h}` },
+          )
+        }
+
+        // ── Vitals fetch: once per week ────────────────────────────────────
+        const lastVitalsMs = lastVitalsMap.get(site.id) ?? 0
+        if (now - lastVitalsMs >= SEVEN_DAYS_MS) {
+          const weekSlot = Math.floor(now / SEVEN_DAYS_MS)
+          await vitalsQueue.add(
+            'vitals.fetch',
+            { siteId: site.id },
+            { jobId: `vitals:${site.id}:${weekSlot}` },
           )
         }
       }

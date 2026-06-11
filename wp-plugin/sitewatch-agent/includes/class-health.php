@@ -109,44 +109,143 @@ class SiteWatch_Health {
 	/**
 	 * Returns submission counts for detected form plugins (spec §3.3).
 	 * Degrades gracefully when plugins are absent.
+	 * Each entry: { plugin, form_id, form_name, count_24h, count_7d, last_entry_at }
 	 */
 	private function form_counts() {
 		global $wpdb;
-		$forms = array();
+		$forms     = array();
+		$since_24h = gmdate( 'Y-m-d H:i:s', time() - DAY_IN_SECONDS );
+		$since_7d  = gmdate( 'Y-m-d H:i:s', time() - 7 * DAY_IN_SECONDS );
 
 		// ── Gravity Forms ──────────────────────────────────────────────────────
 		if ( class_exists( 'GFAPI' ) ) {
 			foreach ( GFAPI::get_forms() as $form ) {
-				$since = gmdate( 'Y-m-d H:i:s', time() - DAY_IN_SECONDS );
 				// phpcs:ignore WordPress.DB.DirectDatabaseQuery
 				$count_24h = (int) $wpdb->get_var(
 					$wpdb->prepare(
-						"SELECT COUNT(*) FROM {$wpdb->prefix}gf_entry WHERE form_id = %d AND date_created >= %s AND status = 'active'",
-						$form['id'],
-						$since
+						"SELECT COUNT(*) FROM {$wpdb->prefix}gf_entry WHERE form_id=%d AND date_created>=%s AND status='active'",
+						$form['id'], $since_24h
+					)
+				);
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+				$count_7d = (int) $wpdb->get_var(
+					$wpdb->prepare(
+						"SELECT COUNT(*) FROM {$wpdb->prefix}gf_entry WHERE form_id=%d AND date_created>=%s AND status='active'",
+						$form['id'], $since_7d
+					)
+				);
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+				$last_entry = $wpdb->get_var(
+					$wpdb->prepare(
+						"SELECT MAX(date_created) FROM {$wpdb->prefix}gf_entry WHERE form_id=%d AND status='active'",
+						$form['id']
 					)
 				);
 				$forms[] = array(
-					'plugin'    => 'gravityforms',
-					'form_id'   => (string) $form['id'],
-					'form_name' => $form['title'],
-					'count_24h' => $count_24h,
+					'plugin'        => 'gravityforms',
+					'form_id'       => (string) $form['id'],
+					'form_name'     => $form['title'],
+					'count_24h'     => $count_24h,
+					'count_7d'      => $count_7d,
+					'last_entry_at' => $last_entry ? gmdate( 'c', strtotime( $last_entry ) ) : null,
 				);
 			}
 		}
 
 		// ── WPForms ────────────────────────────────────────────────────────────
-		if ( function_exists( 'wpforms' ) && class_exists( '\WPForms\Pro\Forms\Entry' ) ) {
-			// Entries table exists only in Pro; degrade gracefully
+		if ( function_exists( 'wpforms' ) ) {
 			$forms_list = wpforms()->get( 'form' )->get( '', array( 'fields' => 'ids' ) );
 			foreach ( (array) $forms_list as $form_id ) {
 				$form_obj  = wpforms()->get( 'form' )->get( $form_id );
 				$form_name = isset( $form_obj->post_title ) ? $form_obj->post_title : (string) $form_id;
-				$forms[]   = array(
-					'plugin'    => 'wpforms',
-					'form_id'   => (string) $form_id,
-					'form_name' => $form_name,
-					'count_24h' => null, // requires Pro; set to null rather than 0
+				$count_24h = null;
+				$count_7d  = null;
+				$last_entry_at = null;
+
+				// Entries table only exists in WPForms Pro
+				$entry_table = $wpdb->prefix . 'wpforms_entries';
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+				$table_exists = (bool) $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $entry_table ) );
+				if ( $table_exists ) {
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+					$count_24h = (int) $wpdb->get_var(
+						$wpdb->prepare(
+							"SELECT COUNT(*) FROM {$entry_table} WHERE form_id=%d AND date>=%s",
+							$form_id, $since_24h
+						)
+					);
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+					$count_7d = (int) $wpdb->get_var(
+						$wpdb->prepare(
+							"SELECT COUNT(*) FROM {$entry_table} WHERE form_id=%d AND date>=%s",
+							$form_id, $since_7d
+						)
+					);
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+					$last_raw = $wpdb->get_var(
+						$wpdb->prepare(
+							"SELECT MAX(date) FROM {$entry_table} WHERE form_id=%d",
+							$form_id
+						)
+					);
+					$last_entry_at = $last_raw ? gmdate( 'c', strtotime( $last_raw ) ) : null;
+				}
+
+				$forms[] = array(
+					'plugin'        => 'wpforms',
+					'form_id'       => (string) $form_id,
+					'form_name'     => $form_name,
+					'count_24h'     => $count_24h,
+					'count_7d'      => $count_7d,
+					'last_entry_at' => $last_entry_at,
+				);
+			}
+		}
+
+		// ── Contact Form 7 + Flamingo ──────────────────────────────────────────
+		if ( class_exists( 'WPCF7' ) && post_type_exists( 'flamingo-inbound' ) ) {
+			$cf7_forms = WPCF7_ContactForm::find();
+			foreach ( $cf7_forms as $cf7form ) {
+				$channel   = 'contact-form-7.' . $cf7form->id();
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+				$count_24h = (int) $wpdb->get_var(
+					$wpdb->prepare(
+						"SELECT COUNT(*) FROM {$wpdb->posts} p
+						 INNER JOIN {$wpdb->postmeta} m ON p.ID=m.post_id
+						 WHERE p.post_type='flamingo-inbound'
+						   AND m.meta_key='_channel' AND m.meta_value=%s
+						   AND p.post_date_gmt>=%s",
+						$channel, $since_24h
+					)
+				);
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+				$count_7d = (int) $wpdb->get_var(
+					$wpdb->prepare(
+						"SELECT COUNT(*) FROM {$wpdb->posts} p
+						 INNER JOIN {$wpdb->postmeta} m ON p.ID=m.post_id
+						 WHERE p.post_type='flamingo-inbound'
+						   AND m.meta_key='_channel' AND m.meta_value=%s
+						   AND p.post_date_gmt>=%s",
+						$channel, $since_7d
+					)
+				);
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+				$last_raw = $wpdb->get_var(
+					$wpdb->prepare(
+						"SELECT MAX(p.post_date_gmt) FROM {$wpdb->posts} p
+						 INNER JOIN {$wpdb->postmeta} m ON p.ID=m.post_id
+						 WHERE p.post_type='flamingo-inbound'
+						   AND m.meta_key='_channel' AND m.meta_value=%s",
+						$channel
+					)
+				);
+				$forms[] = array(
+					'plugin'        => 'cf7',
+					'form_id'       => (string) $cf7form->id(),
+					'form_name'     => $cf7form->title(),
+					'count_24h'     => $count_24h,
+					'count_7d'      => $count_7d,
+					'last_entry_at' => $last_raw ? gmdate( 'c', strtotime( $last_raw ) ) : null,
 				);
 			}
 		}

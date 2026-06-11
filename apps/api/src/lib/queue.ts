@@ -28,3 +28,5 @@ export const schedulerQueue = new Queue('scheduler', { connection: BULL_CONNECTI
 export const eventsQueue    = new Queue('events',    { connection: BULL_CONNECTION })
 export const healthQueue    = new Queue('health',    { connection: BULL_CONNECTION })
 export const vulnQueue      = new Queue('vuln',      { connection: BULL_CONNECTION })
+export const formsQueue     = new Queue('forms',     { connection: BULL_CONNECTION })
+export const vitalsQueue    = new Queue('vitals',    { connection: BULL_CONNECTION })
