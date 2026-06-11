@@ -37,18 +37,51 @@ const pairBody = z.object({
 export default async function sitesRoutes(fastify: FastifyInstance) {
   const { authenticate } = fastify
 
-  // GET /v1/sites
+  // GET /v1/sites — includes 24h uptime % and last response time
   fastify.get('/v1/sites', { preHandler: authenticate }, async (req, reply) => {
-    const sites = await prisma.site.findMany({
-      where: { org_id: req.user.orgId },
-      include: {
-        ssl_status: { select: { expires_at: true, grade: true } },
-        alerts: { where: { resolved_at: null }, select: { severity: true } },
-        plugins: { where: { update_available: true }, select: { id: true } },
-      },
-      orderBy: { created_at: 'asc' },
+    const since24h = new Date(Date.now() - 24 * 3_600_000)
+
+    const [sites, recentChecks] = await Promise.all([
+      prisma.site.findMany({
+        where: { org_id: req.user.orgId },
+        include: {
+          ssl_status: { select: { expires_at: true, grade: true } },
+          alerts: { where: { resolved_at: null }, select: { severity: true } },
+          plugins: { where: { update_available: true }, select: { id: true } },
+        },
+        orderBy: { created_at: 'asc' },
+      }),
+      prisma.uptimeCheck.findMany({
+        where: {
+          site: { org_id: req.user.orgId },
+          checked_at: { gte: since24h },
+        },
+        select: { site_id: true, ok: true, response_ms: true },
+        orderBy: { checked_at: 'desc' },
+      }),
+    ])
+
+    // Aggregate uptime stats per site (first result per site = latest check)
+    const statsMap = new Map<string, { total: number; ok: number; lastMs: number | null }>()
+    for (const c of recentChecks) {
+      if (!statsMap.has(c.site_id)) {
+        statsMap.set(c.site_id, { total: 0, ok: 0, lastMs: c.response_ms })
+      }
+      const s = statsMap.get(c.site_id)!
+      s.total++
+      if (c.ok) s.ok++
+    }
+
+    const enriched = sites.map(site => {
+      const st = statsMap.get(site.id)
+      return {
+        ...site,
+        uptime_pct_24h: st && st.total > 0 ? Math.round((st.ok / st.total) * 1000) / 10 : null,
+        last_response_ms: st?.lastMs ?? null,
+      }
     })
-    return reply.send({ sites })
+
+    return reply.send({ sites: enriched })
   })
 
   // POST /v1/sites — generates pairing code, returns it to the app
@@ -72,12 +105,15 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
     return reply.status(201).send({ site, pairingCode })
   })
 
-  // GET /v1/sites/:id
+  // GET /v1/sites/:id — includes full plugin list for site detail screen
   fastify.get('/v1/sites/:id', { preHandler: authenticate }, async (req, reply) => {
     const { id } = req.params as { id: string }
     const site = await prisma.site.findFirst({
       where: { id, org_id: req.user.orgId },
-      include: { ssl_status: true },
+      include: {
+        ssl_status: true,
+        plugins: { orderBy: { name: 'asc' } },
+      },
     })
     if (!site) return reply.status(404).send({ error: 'Site not found' })
     return reply.send({ site })
@@ -138,6 +174,41 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
       checks,
       uptimePct: checks.length > 0 ? (ok / checks.length) * 100 : null,
     })
+  })
+
+  // GET /v1/sites/:id/events — security timeline with cursor pagination
+  fastify.get('/v1/sites/:id/events', { preHandler: authenticate }, async (req, reply) => {
+    const { id } = req.params as { id: string }
+    const { limit = '50', before, severity } = req.query as {
+      limit?: string; before?: string; severity?: string
+    }
+
+    const site = await prisma.site.findFirst({ where: { id, org_id: req.user.orgId } })
+    if (!site) return reply.status(404).send({ error: 'Site not found' })
+
+    const severityFilter = severity
+      ? { severity: { in: severity.split(',') as ('info' | 'warning' | 'critical')[] } }
+      : {}
+    const cursorFilter = before ? { occurred_at: { lt: new Date(before) } } : {}
+    const take = Math.min(parseInt(limit, 10) || 50, 200)
+
+    const events = await prisma.event.findMany({
+      where: { site_id: id, ...severityFilter, ...cursorFilter },
+      orderBy: { occurred_at: 'desc' },
+      take: take + 1,
+      select: {
+        id: true, type: true, severity: true, occurred_at: true,
+        actor: true, data: true, ip: true, geo: true,
+        correlated_event_id: true,
+        alerts: { select: { id: true, rule: true } },
+      },
+    })
+
+    const hasMore = events.length > take
+    const page = events.slice(0, take)
+    const nextCursor = hasMore ? page[page.length - 1].occurred_at.toISOString() : null
+
+    return reply.send({ events: page, nextCursor })
   })
 
   // ─── Agent endpoints (HMAC auth, no JWT) ────────────────────────────────────
