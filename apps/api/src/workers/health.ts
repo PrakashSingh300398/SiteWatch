@@ -23,12 +23,22 @@ interface WpForm {
   last_entry_at: string | null
 }
 
+interface WpUser {
+  user_login: string
+  display_name: string
+  email: string
+  roles: string[]
+  registered: string
+}
+
 interface HealthSnapshot {
   wp_version?: string
   wp_update_available?: string | null
   php_version?: string
   plugins?: WpPlugin[]
   administrators?: Array<{ user_login: string }>
+  users?: WpUser[]
+  active_theme?: { name: string; slug: string; version: string }
   security?: {
     disallow_file_edit?: boolean
     wp_debug_on?: boolean
@@ -113,9 +123,10 @@ export function startHealthWorker() {
       await prisma.site.update({
         where: { id: siteId },
         data: {
-          wp_version: snapshot.wp_version ?? null,
-          php_version: snapshot.php_version ?? null,
+          wp_version:     snapshot.wp_version  ?? null,
+          php_version:    snapshot.php_version ?? null,
           last_health_at: new Date(),
+          wp_users:       (snapshot.users ?? []) as unknown as Prisma.InputJsonValue,
         },
       })
 

@@ -43,6 +43,9 @@ class SiteWatch_Event_Hooks {
 		// Critical option changes
 		add_action( 'updated_option', array( $this, 'on_option_updated' ), 10, 3 );
 
+		// Theme file edits via WP admin editor
+		add_action( 'edit_theme_plugin_file', array( $this, 'on_theme_file_edited' ), 10, 1 );
+
 		// Content (info / digest only)
 		add_action( 'transition_post_status', array( $this, 'on_post_status_change' ), 10, 3 );
 	}
@@ -142,20 +145,47 @@ class SiteWatch_Event_Hooks {
 		$action = isset( $options['action'] ) ? $options['action'] : '';
 
 		if ( 'plugin' === $type ) {
-			$is_install  = 'install' === $action;
-			$event_type  = $is_install ? 'plugin.installed' : 'plugin.updated';
-			$severity    = $is_install ? 'warning' : 'info';
-			// WP passes plugins as array or single 'plugin' key
-			$plugins = isset( $options['plugins'] )
+			$is_install = 'install' === $action;
+			$event_type = $is_install ? 'plugin.installed' : 'plugin.updated';
+			$severity   = $is_install ? 'warning' : 'info';
+
+			$plugin_files = isset( $options['plugins'] )
 				? (array) $options['plugins']
 				: ( isset( $options['plugin'] ) ? array( $options['plugin'] ) : array() );
 
-			$this->queue->push( $event_type, $severity, array( 'plugins' => $plugins ) );
+			// Resolve human-readable names from plugin file paths
+			$plugin_names = array_map( array( $this, 'plugin_name' ), $plugin_files );
+
+			$this->queue->push(
+				$event_type,
+				$severity,
+				array(
+					'plugins'      => $plugin_files,
+					'plugin_names' => $plugin_names,
+					// Convenience: single name for display when only one plugin
+					'name'         => count( $plugin_names ) === 1 ? $plugin_names[0] : implode( ', ', $plugin_names ),
+				)
+			);
 
 		} elseif ( 'theme' === $type ) {
-			$event_type = 'install' === $action ? 'theme.installed' : 'theme.updated';
-			$themes     = isset( $options['themes'] ) ? (array) $options['themes'] : array();
-			$this->queue->push( $event_type, 'info', array( 'themes' => $themes ) );
+			$event_type  = 'install' === $action ? 'theme.installed' : 'theme.updated';
+			$theme_slugs = isset( $options['themes'] ) ? (array) $options['themes'] : array();
+			$theme_names = array_map(
+				function ( $slug ) {
+					$theme = wp_get_theme( $slug );
+					return $theme->exists() ? $theme->get( 'Name' ) : $slug;
+				},
+				$theme_slugs
+			);
+			$this->queue->push(
+				$event_type,
+				'info',
+				array(
+					'themes'      => $theme_slugs,
+					'theme_names' => $theme_names,
+					'name'        => count( $theme_names ) === 1 ? $theme_names[0] : implode( ', ', $theme_names ),
+				)
+			);
 
 		} elseif ( 'core' === $type ) {
 			$this->queue->push(
@@ -206,6 +236,22 @@ class SiteWatch_Event_Hooks {
 			array(
 				'new_theme' => $new_theme,
 				'old_theme' => is_object( $old_theme ) ? $old_theme->get( 'Name' ) : (string) $old_theme,
+			)
+		);
+	}
+
+	public function on_theme_file_edited( $args ) {
+		$file  = isset( $args['file'] ) ? $args['file'] : ( is_string( $args ) ? $args : '' );
+		$theme = isset( $args['theme'] ) ? $args['theme'] : get_option( 'stylesheet' );
+		$user  = wp_get_current_user();
+
+		$this->queue->push(
+			'theme.file_edited',
+			'warning',
+			array(
+				'theme'      => $theme,
+				'file'       => $file,
+				'user_login' => $user ? $user->user_login : '',
 			)
 		);
 	}

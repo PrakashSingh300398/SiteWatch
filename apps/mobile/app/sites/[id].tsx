@@ -11,7 +11,7 @@ import { UptimeChart, ResponseSparkline } from '../../src/components/UptimeChart
 import { ScoreGauge } from '../../src/components/ScoreGauge'
 import { StatusDot } from '../../src/components/StatusDot'
 import { colors, spacing, radius, severityColor } from '../../src/theme'
-import type { SiteDetail, UptimeCheck, SiteEvent, Plugin, FormMonitorRecord, WebVitalsRecord } from '../../src/api/types'
+import type { SiteDetail, UptimeCheck, SiteEvent, Plugin, FormMonitorRecord, WebVitalsRecord, WpUserRecord } from '../../src/api/types'
 
 type Tab = 'overview' | 'security' | 'forms' | 'vitals'
 
@@ -63,6 +63,13 @@ export default function SiteDetailScreen() {
       enabled: tab === 'vitals',
     })
 
+  const { data: usersData, refetch: refetchUsers } =
+    useQuery({
+      queryKey: ['wp-users', id],
+      queryFn: () => api<WpUserRecord[]>(`/v1/sites/${id}/users`),
+      enabled: tab === 'security',
+    })
+
   const site    = siteData?.site
   const checks  = uptimeData?.checks ?? []
   const events  = eventsData?.pages.flatMap(p => p.events) ?? []
@@ -76,6 +83,7 @@ export default function SiteDetailScreen() {
       refetchSite(),
       refetchUptime(),
       tab === 'security' && refetchEvents(),
+      tab === 'security' && refetchUsers(),
       tab === 'forms'    && refetchForms(),
       tab === 'vitals'   && refetchVitals(),
     ])
@@ -229,6 +237,27 @@ export default function SiteDetailScreen() {
               </View>
             )}
 
+            {/* Users */}
+            {usersData && usersData.length > 0 && (
+              <View style={styles.card}>
+                <View style={styles.cardHeader}>
+                  <Text style={styles.cardTitle}>Site users ({usersData.length})</Text>
+                  <Text style={styles.muted}>Manage in WP Admin</Text>
+                </View>
+                {usersData.map(u => (
+                  <View key={u.user_login} style={styles.infoRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.infoLabel}>{u.display_name || u.user_login}</Text>
+                      <Text style={styles.muted}>{u.email}</Text>
+                    </View>
+                    <View style={[styles.roleChip, u.roles.includes('administrator') && styles.roleChipAdmin]}>
+                      <Text style={styles.roleChipText}>{u.roles[0] ?? 'user'}</Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
+
             {/* Activity timeline */}
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Activity timeline</Text>
@@ -344,8 +373,14 @@ function EventRow({ event }: { event: SiteEvent }) {
 
   const subtitle = (() => {
     if (actor?.user_login) return `User: ${actor.user_login}${geo ? ` · ${geo.city}, ${geo.countryCode}` : ''}`
-    if (data?.plugin || data?.name) return String(data.plugin ?? data.name ?? '')
+    // Plugin events: prefer resolved name over raw file path
+    if (data?.name)   return String(data.name)
+    if (data?.plugin) return String(data.plugin)
+    // Theme file edit
+    if (data?.file && data?.theme) return `${data.theme}: ${data.file}${data.user_login ? ` by ${data.user_login}` : ''}`
+    if (data?.new_theme) return `→ ${data.new_theme}`
     if (data?.option) return `Option: ${data.option}`
+    if (data?.version) return `v${data.version}`
     return ''
   })()
 
@@ -404,6 +439,9 @@ const styles = StyleSheet.create({
   causeText:{ fontSize: 10, color: colors.warning },
   loadMore: { alignItems: 'center', paddingVertical: spacing.md },
   loadMoreText: { color: colors.accent, fontSize: 13 },
+  roleChip:      { backgroundColor: '#1e293b', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
+  roleChipAdmin: { backgroundColor: '#7f1d1d' },
+  roleChipText:  { fontSize: 11, color: '#94a3b8', fontWeight: '600' },
   stoppedChip: { backgroundColor: '#7f1d1d', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 },
   stoppedText: { fontSize: 10, fontWeight: '700', color: '#fca5a5' },
   formPlugin: { fontSize: 11, color: colors.muted, marginBottom: 4 },

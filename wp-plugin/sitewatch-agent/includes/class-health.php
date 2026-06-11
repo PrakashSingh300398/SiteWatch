@@ -14,6 +14,8 @@ class SiteWatch_Health {
 			'plugins'            => $this->plugins(),
 			'themes'             => $this->themes(),
 			'administrators'     => $this->administrators(),
+			'users'              => $this->elevated_users(),
+			'active_theme'       => $this->active_theme(),
 			'security'           => $this->security_checklist(),
 			'forms'              => $this->form_counts(),
 		);
@@ -92,6 +94,38 @@ class SiteWatch_Health {
 				return array( 'user_login' => $u->user_login );
 			},
 			$users
+		);
+	}
+
+	private function elevated_users() {
+		$users = get_users(
+			array(
+				'role__in'  => array( 'administrator', 'editor', 'author', 'shop_manager' ),
+				'number'    => 50,
+				'orderby'   => 'registered',
+				'order'     => 'DESC',
+			)
+		);
+		return array_map(
+			function ( $u ) {
+				return array(
+					'user_login'   => $u->user_login,
+					'display_name' => $u->display_name,
+					'email'        => $u->user_email,
+					'roles'        => array_values( $u->roles ),
+					'registered'   => $u->user_registered,
+				);
+			},
+			$users
+		);
+	}
+
+	private function active_theme() {
+		$theme = wp_get_theme();
+		return array(
+			'name'    => $theme->get( 'Name' ),
+			'slug'    => get_option( 'stylesheet' ),
+			'version' => $theme->get( 'Version' ),
 		);
 	}
 

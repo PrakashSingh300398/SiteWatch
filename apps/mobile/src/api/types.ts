@@ -90,6 +90,14 @@ export interface DashboardData {
   updates: { pending: number }
 }
 
+export interface WpUserRecord {
+  user_login: string
+  display_name: string
+  email: string
+  roles: string[]
+  registered: string
+}
+
 export interface FormMonitorRecord {
   id: string
   form_plugin: 'gravityforms' | 'wpforms' | 'cf7'

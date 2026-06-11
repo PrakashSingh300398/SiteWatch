@@ -158,6 +158,18 @@ async function applyRule(
       break
     }
 
+    case 'theme.file_edited': {
+      await createAlert(prisma, {
+        siteId: site.id, orgId: site.org_id,
+        rule: 'theme_file_edited',
+        severity: 'warning',
+        title: `Theme file edited on ${site.name}`,
+        body: `"${data.file ?? 'unknown file'}" in theme "${data.theme ?? 'unknown'}" was edited via WP admin${data.user_login ? ` by ${data.user_login}` : ''}`,
+        eventId: ev!.id,
+      })
+      break
+    }
+
     case 'integrity.php_in_uploads': {
       const count = Number(data.count ?? 1)
       const sample = String(data.sample ?? '')

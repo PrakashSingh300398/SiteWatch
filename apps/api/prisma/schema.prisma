@@ -103,6 +103,7 @@ model Site {
   score_breakdown    Json?
   check_interval_sec Int        @default(300)
   settings           Json       @default("{}")
+  wp_users           Json       @default("[]")
   created_at         DateTime   @default(now())
 
   org                 Organization      @relation(fields: [org_id], references: [id], onDelete: Cascade)

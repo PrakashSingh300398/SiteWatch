@@ -312,6 +312,17 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
     return reply.send(forms)
   })
 
+  // GET /v1/sites/:id/users — elevated WP users from last health pull
+  fastify.get('/v1/sites/:id/users', { preHandler: authenticate }, async (req, reply) => {
+    const { id } = req.params as { id: string }
+    const site = await prisma.site.findFirst({
+      where: { id, org_id: req.user.orgId },
+      select: { wp_users: true },
+    })
+    if (!site) return reply.status(404).send({ error: 'Not found' })
+    return reply.send(site.wp_users ?? [])
+  })
+
   // GET /v1/sites/:id/vitals
   fastify.get('/v1/sites/:id/vitals', { preHandler: authenticate }, async (req, reply) => {
     const { id } = req.params as { id: string }
