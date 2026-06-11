@@ -5,6 +5,6 @@ buildCommand = "npm install --legacy-peer-deps && npx prisma generate --schema=a
 [deploy]
 startCommand = "npx prisma migrate deploy --schema=apps/api/prisma/schema.prisma && node apps/api/dist/index.js"
 healthcheckPath = "/health"
-healthcheckTimeout = 30
+healthcheckTimeout = 60
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
