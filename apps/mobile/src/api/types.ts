@@ -22,6 +22,8 @@ export interface SiteBase {
   check_interval_sec: number
   created_at: string
   ssl_status?: { expires_at: string | null; grade: string | null }
+  active_theme?: { name: string; slug: string; version: string } | null
+  wp_users?: WpUserRecord[]
 }
 
 // GET /v1/sites — list with uptime stats; plugins are update-available count only

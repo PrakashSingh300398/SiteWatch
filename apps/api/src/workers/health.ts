@@ -126,7 +126,8 @@ export function startHealthWorker() {
           wp_version:     snapshot.wp_version  ?? null,
           php_version:    snapshot.php_version ?? null,
           last_health_at: new Date(),
-          wp_users:       (snapshot.users ?? []) as unknown as Prisma.InputJsonValue,
+          wp_users:       (snapshot.users        ?? [])   as unknown as Prisma.InputJsonValue,
+          active_theme:   (snapshot.active_theme ?? null) as unknown as Prisma.InputJsonValue,
         },
       })
 

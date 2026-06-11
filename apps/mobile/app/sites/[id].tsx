@@ -63,12 +63,7 @@ export default function SiteDetailScreen() {
       enabled: tab === 'vitals',
     })
 
-  const { data: usersData, refetch: refetchUsers } =
-    useQuery({
-      queryKey: ['wp-users', id],
-      queryFn: () => api<WpUserRecord[]>(`/v1/sites/${id}/users`),
-      enabled: tab === 'security',
-    })
+  const usersData = site?.wp_users ?? []
 
   const site    = siteData?.site
   const checks  = uptimeData?.checks ?? []
@@ -83,7 +78,6 @@ export default function SiteDetailScreen() {
       refetchSite(),
       refetchUptime(),
       tab === 'security' && refetchEvents(),
-      tab === 'security' && refetchUsers(),
       tab === 'forms'    && refetchForms(),
       tab === 'vitals'   && refetchVitals(),
     ])
@@ -184,12 +178,15 @@ export default function SiteDetailScreen() {
             {/* Site info */}
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Site info</Text>
-              {[
+              {([
                 ['WordPress', site?.wp_version  ?? 'Unknown'],
                 ['PHP',       site?.php_version ?? 'Unknown'],
+                ['Active theme', site?.active_theme
+                  ? `${site.active_theme.name} v${site.active_theme.version}`
+                  : 'Unknown'],
                 ['Last check', site?.last_check_at ? new Date(site.last_check_at).toLocaleString() : 'Never'],
                 ['Last health pull', site?.last_health_at ? new Date(site.last_health_at).toLocaleString() : 'Never'],
-              ].map(([label, value]) => (
+              ] as [string, string][]).map(([label, value]) => (
                 <View key={label} style={styles.infoRow}>
                   <Text style={styles.infoLabel}>{label}</Text>
                   <Text style={styles.infoValue}>{value}</Text>
@@ -373,13 +370,23 @@ function EventRow({ event }: { event: SiteEvent }) {
 
   const subtitle = (() => {
     if (actor?.user_login) return `User: ${actor.user_login}${geo ? ` · ${geo.city}, ${geo.countryCode}` : ''}`
-    // Plugin events: prefer resolved name over raw file path
-    if (data?.name)   return String(data.name)
+    // Plugin events: prefer resolved name, fall back to parsing file path
+    if (data?.name) return String(data.name)
+    if (data?.plugins) {
+      const paths = data.plugins as string[]
+      if (paths.length > 0) {
+        const names = paths.map(p => {
+          const folder = p.split('/')[0]
+          return folder.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+        })
+        return names.join(', ')
+      }
+    }
     if (data?.plugin) return String(data.plugin)
-    // Theme file edit
+    // Theme events
     if (data?.file && data?.theme) return `${data.theme}: ${data.file}${data.user_login ? ` by ${data.user_login}` : ''}`
     if (data?.new_theme) return `→ ${data.new_theme}`
-    if (data?.option) return `Option: ${data.option}`
+    if (data?.option)  return `Option: ${data.option}`
     if (data?.version) return `v${data.version}`
     return ''
   })()

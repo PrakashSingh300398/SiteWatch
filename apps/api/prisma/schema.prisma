@@ -104,6 +104,7 @@ model Site {
   check_interval_sec Int        @default(300)
   settings           Json       @default("{}")
   wp_users           Json       @default("[]")
+  active_theme       Json?
   created_at         DateTime   @default(now())
 
   org                 Organization      @relation(fields: [org_id], references: [id], onDelete: Cascade)
