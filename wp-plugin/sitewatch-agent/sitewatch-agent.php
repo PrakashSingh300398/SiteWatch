@@ -3,7 +3,7 @@
  * Plugin Name:       SiteWatch Agent
  * Plugin URI:        https://sitewatch.example
  * Description:       WordPress monitoring agent for SiteWatch — reports site health, security events, and AI crawler traffic to the SiteWatch backend.
- * Version:           1.0.0
+ * Version:           1.3.0
  * Author:            Prakash Singh / Code to Click
  * Author URI:        https://codetoclick.ca
  * License:           GPL-2.0-or-later
@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'SITEWATCH_VERSION', '1.0.0' );
+define( 'SITEWATCH_VERSION', '1.3.0' );
 define( 'SITEWATCH_PLUGIN_FILE', __FILE__ );
 define( 'SITEWATCH_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
