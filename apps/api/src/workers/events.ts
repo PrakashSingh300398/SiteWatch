@@ -157,6 +157,34 @@ async function applyRule(
       })
       break
     }
+
+    case 'integrity.php_in_uploads': {
+      const count = Number(data.count ?? 1)
+      const sample = String(data.sample ?? '')
+      await createAlert(prisma, {
+        siteId: site.id, orgId: site.org_id,
+        rule: 'integrity.php_in_uploads',
+        severity: 'critical',
+        title: `PHP file found in uploads on ${site.name}`,
+        body: `${count} PHP file${count !== 1 ? 's' : ''} detected in wp-content/uploads/${sample ? ` (e.g. ${sample})` : ''} — possible malware upload.`,
+        eventId: ev!.id,
+      })
+      break
+    }
+
+    case 'integrity.core_modified': {
+      const count = Number(data.count ?? 1)
+      const sample = String(data.sample ?? '')
+      await createAlert(prisma, {
+        siteId: site.id, orgId: site.org_id,
+        rule: 'integrity.core_modified',
+        severity: 'critical',
+        title: `WP core file modified on ${site.name}`,
+        body: `${count} WordPress core file${count !== 1 ? 's' : ''} have unexpected checksums${sample ? ` (e.g. ${sample})` : ''} — possible compromise.`,
+        eventId: ev!.id,
+      })
+      break
+    }
   }
 }
 

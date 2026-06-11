@@ -1,6 +1,6 @@
 import { Worker } from 'bullmq'
 import { prisma } from '../lib/prisma'
-import { uptimeQueue, sslQueue, schedulerQueue, healthQueue, formsQueue, vitalsQueue, BULL_CONNECTION } from '../lib/queue'
+import { uptimeQueue, sslQueue, schedulerQueue, healthQueue, formsQueue, vitalsQueue, digestQueue, BULL_CONNECTION } from '../lib/queue'
 
 export async function startScheduler() {
   // Register the repeatable trigger — idempotent on restart
@@ -16,6 +16,23 @@ export async function startScheduler() {
     async () => {
       const now = Date.now()
       const todayStr = new Date().toISOString().slice(0, 10) // 'YYYY-MM-DD'
+
+      // ── Digest: once per calendar day at org's configured hour (UTC) ──────
+      const currentHour = new Date().getUTCHours()
+      const todayStart  = new Date(now); todayStart.setUTCHours(0, 0, 0, 0)
+      const orgs = await prisma.organization.findMany({
+        select: { id: true, digest_hour: true, last_digest_at: true },
+      })
+      for (const org of orgs) {
+        const notSentToday = !org.last_digest_at || org.last_digest_at < todayStart
+        if (notSentToday && currentHour >= org.digest_hour) {
+          await digestQueue.add(
+            'digest.daily',
+            { orgId: org.id },
+            { jobId: `digest:${org.id}:${todayStr}` },
+          )
+        }
+      }
 
       const sites = await prisma.site.findMany({
         where: { paired_at: { not: null } },

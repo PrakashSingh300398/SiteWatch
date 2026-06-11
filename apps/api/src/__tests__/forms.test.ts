@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { Decimal } from '@prisma/client/runtime/library'
 
 // ── Minimal Prisma mock ────────────────────────────────────────────────────────
 
@@ -33,7 +34,7 @@ interface MockMonitor {
   form_plugin: string
   form_id: string
   form_name: string
-  baseline_daily: number | null
+  baseline_daily: Decimal | null
   count_24h: number
   count_7d: number
   last_entry_at: Date | null
@@ -48,7 +49,7 @@ function makeMonitor(overrides: Partial<MockMonitor> = {}): MockMonitor {
     form_plugin:   'gravityforms',
     form_id:       '1',
     form_name:     'Contact',
-    baseline_daily: 5,
+    baseline_daily: new Decimal(5),
     count_24h:     3,
     count_7d:      21,
     last_entry_at: new Date(),
@@ -60,9 +61,9 @@ function makeMonitor(overrides: Partial<MockMonitor> = {}): MockMonitor {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mockUpdate.mockResolvedValue({})
-  mockCreateAlert.mockResolvedValue({ id: 'alert-1' })
-  mockResolveAlert.mockResolvedValue({})
+  mockUpdate.mockResolvedValue({} as never)
+  mockCreateAlert.mockResolvedValue({ id: 'alert-1' } as never)
+  mockResolveAlert.mockResolvedValue(0)
 })
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

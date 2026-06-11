@@ -29,11 +29,14 @@ require_once SITEWATCH_PLUGIN_DIR . 'includes/class-event-hooks.php';
 require_once SITEWATCH_PLUGIN_DIR . 'includes/class-health.php';
 require_once SITEWATCH_PLUGIN_DIR . 'includes/class-rest.php';
 require_once SITEWATCH_PLUGIN_DIR . 'includes/class-ai-crawler.php';
+require_once SITEWATCH_PLUGIN_DIR . 'includes/class-integrity.php';
 require_once SITEWATCH_PLUGIN_DIR . 'admin/class-settings-page.php';
 
 // ── Lifecycle hooks ───────────────────────────────────────────────────────────
 register_activation_hook( __FILE__, array( 'SiteWatch_DB', 'activate' ) );
+register_activation_hook( __FILE__, array( 'SiteWatch_Integrity', 'schedule' ) );
 register_deactivation_hook( __FILE__, array( 'SiteWatch_DB', 'deactivate' ) );
+register_deactivation_hook( __FILE__, array( 'SiteWatch_Integrity', 'unschedule' ) );
 register_uninstall_hook( __FILE__, array( 'SiteWatch_DB', 'uninstall' ) );
 
 // ── Custom cron interval (1 min) ──────────────────────────────────────────────
@@ -78,4 +81,10 @@ function sitewatch_init() {
 	// Cron callbacks (must always be registered so WP can call them)
 	add_action( 'sitewatch_flush_events', array( 'SiteWatch_Event_Queue', 'flush_cron' ) );
 	add_action( 'sitewatch_flush_ai_stats', array( 'SiteWatch_AI_Crawler', 'flush_cron' ) );
+	add_action( 'sitewatch_integrity_scan', array( 'SiteWatch_Integrity', 'run_cron' ) );
+
+	// Schedule integrity scan if it's not yet scheduled (handles first boot after upgrade)
+	if ( get_option( 'sitewatch_site_id' ) ) {
+		SiteWatch_Integrity::schedule();
+	}
 }

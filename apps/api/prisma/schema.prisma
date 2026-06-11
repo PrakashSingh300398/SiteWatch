@@ -59,10 +59,12 @@ enum GscConnectionStatus {
 // ─── Core tables ──────────────────────────────────────────────────────────────
 
 model Organization {
-  id         String   @id @default(uuid())
-  name       String
-  plan       OrgPlan  @default(starter)
-  created_at DateTime @default(now())
+  id             String    @id @default(uuid())
+  name           String
+  plan           OrgPlan   @default(starter)
+  digest_hour    Int       @default(8)
+  last_digest_at DateTime?
+  created_at     DateTime  @default(now())
 
   users  User[]
   sites  Site[]
