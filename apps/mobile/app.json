@@ -37,7 +37,7 @@
       "typedRoutes": true
     },
     "extra": {
-      "apiUrl": "http://localhost:3000",
+      "apiUrl": "https://funny-dingos-listen.loca.lt",
       "eas": {
         "projectId": "YOUR_EAS_PROJECT_ID"
       }

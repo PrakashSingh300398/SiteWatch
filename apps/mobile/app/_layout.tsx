@@ -39,7 +39,8 @@ function RootNav() {
         : await Notifications.requestPermissionsAsync()
       if (status !== 'granted') return
 
-      const tokenData = await Notifications.getExpoPushTokenAsync()
+      const tokenData = await Notifications.getExpoPushTokenAsync().catch(() => null)
+      if (!tokenData) return
       await api('/v1/devices', {
         method: 'POST',
         body: JSON.stringify({ token: tokenData.data }),
