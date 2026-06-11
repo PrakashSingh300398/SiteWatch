@@ -284,7 +284,7 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
 
     // Clear last_health_at so scheduler picks it up, and enqueue directly
     await prisma.site.update({ where: { id }, data: { last_health_at: null } })
-    await healthQueue.add('health.pull', { siteId: id }, { jobId: `health:${id}:manual:${Date.now()}` })
+    await healthQueue.add('health.pull', { siteId: id }, { jobId: `healthmanual-${id}-${Date.now()}` })
     return reply.send({ ok: true, message: 'Health pull queued' })
   })
 
