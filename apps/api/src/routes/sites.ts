@@ -3,7 +3,7 @@ import type { Prisma } from '@prisma/client'
 import { randomBytes } from 'node:crypto'
 import { z } from 'zod'
 import { prisma } from '../lib/prisma'
-import { uptimeQueue, sslQueue } from '../lib/queue'
+import { uptimeQueue, sslQueue, healthQueue } from '../lib/queue'
 import { verifyAgentRequest } from '../lib/hmac'
 
 const PAIRING_TTL_MS = 15 * 60 * 1000 // 15 minutes
@@ -273,6 +273,19 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
     // For now: record timestamp and return OK so the agent knows we received it.
     await prisma.site.update({ where: { id: siteId }, data: { last_health_at: new Date() } })
     return reply.send({ ok: true })
+  })
+
+  // POST /v1/sites/:id/sync — force immediate health pull
+  fastify.post('/v1/sites/:id/sync', { preHandler: authenticate }, async (req, reply) => {
+    const { id } = req.params as { id: string }
+    const site = await prisma.site.findFirst({ where: { id, org_id: req.user.orgId }, select: { id: true, paired_at: true } })
+    if (!site) return reply.status(404).send({ error: 'Not found' })
+    if (!site.paired_at) return reply.status(400).send({ error: 'Site not paired yet' })
+
+    // Clear last_health_at so scheduler picks it up, and enqueue directly
+    await prisma.site.update({ where: { id }, data: { last_health_at: null } })
+    await healthQueue.add('health.pull', { siteId: id }, { jobId: `health:${id}:manual:${Date.now()}` })
+    return reply.send({ ok: true, message: 'Health pull queued' })
   })
 
   // GET /v1/sites/:id/forms
