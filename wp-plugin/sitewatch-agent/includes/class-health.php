@@ -152,39 +152,50 @@ class SiteWatch_Health {
 			}
 		}
 
-		// ── WPForms ────────────────────────────────────────────────────────────
-		if ( function_exists( 'wpforms' ) ) {
-			$forms_list = wpforms()->get( 'form' )->get( '', array( 'fields' => 'ids' ) );
-			foreach ( (array) $forms_list as $form_id ) {
-				$form_obj  = wpforms()->get( 'form' )->get( $form_id );
-				$form_name = isset( $form_obj->post_title ) ? $form_obj->post_title : (string) $form_id;
+		// ── WPForms (Lite + Pro) ──────────────────────────────────────────────
+		// Use get_posts on the 'wpforms' CPT — works on both Lite and Pro without
+		// relying on the wpforms() helper which has API changes between versions.
+		if ( post_type_exists( 'wpforms' ) ) {
+			$wpf_posts = get_posts(
+				array(
+					'post_type'      => 'wpforms',
+					'post_status'    => 'publish',
+					'posts_per_page' => 50,
+					'fields'         => 'all',
+				)
+			);
+
+			// Entries table only exists in WPForms Pro
+			$entry_table  = $wpdb->prefix . 'wpforms_entries';
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$table_exists = (bool) $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $entry_table ) );
+
+			foreach ( $wpf_posts as $wpf_post ) {
+				$form_id   = $wpf_post->ID;
+				$form_name = $wpf_post->post_title;
 				$count_24h = null;
 				$count_7d  = null;
 				$last_entry_at = null;
 
-				// Entries table only exists in WPForms Pro
-				$entry_table = $wpdb->prefix . 'wpforms_entries';
-				// phpcs:ignore WordPress.DB.DirectDatabaseQuery
-				$table_exists = (bool) $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $entry_table ) );
 				if ( $table_exists ) {
 					// phpcs:ignore WordPress.DB.DirectDatabaseQuery
 					$count_24h = (int) $wpdb->get_var(
 						$wpdb->prepare(
-							"SELECT COUNT(*) FROM {$entry_table} WHERE form_id=%d AND date>=%s",
+							"SELECT COUNT(*) FROM {$entry_table} WHERE form_id=%d AND `date`>=%s",
 							$form_id, $since_24h
 						)
 					);
 					// phpcs:ignore WordPress.DB.DirectDatabaseQuery
 					$count_7d = (int) $wpdb->get_var(
 						$wpdb->prepare(
-							"SELECT COUNT(*) FROM {$entry_table} WHERE form_id=%d AND date>=%s",
+							"SELECT COUNT(*) FROM {$entry_table} WHERE form_id=%d AND `date`>=%s",
 							$form_id, $since_7d
 						)
 					);
 					// phpcs:ignore WordPress.DB.DirectDatabaseQuery
 					$last_raw = $wpdb->get_var(
 						$wpdb->prepare(
-							"SELECT MAX(date) FROM {$entry_table} WHERE form_id=%d",
+							"SELECT MAX(`date`) FROM {$entry_table} WHERE form_id=%d",
 							$form_id
 						)
 					);
