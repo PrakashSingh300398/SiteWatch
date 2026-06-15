@@ -11,7 +11,7 @@ import { UptimeChart, ResponseSparkline } from '../../src/components/UptimeChart
 import { ScoreGauge } from '../../src/components/ScoreGauge'
 import { StatusDot } from '../../src/components/StatusDot'
 import { colors, spacing, radius, severityColor } from '../../src/theme'
-import type { SiteDetail, UptimeCheck, SiteEvent, Plugin, FormMonitorRecord, WebVitalsRecord, WpUserRecord, SeoData } from '../../src/api/types'
+import type { SiteDetail, UptimeCheck, SiteEvent, Plugin, FormMonitorRecord, WebVitalsRecord, WpUserRecord, SeoData, SeoAuditData } from '../../src/api/types'
 
 type Tab = 'overview' | 'security' | 'forms' | 'vitals' | 'seo'
 
@@ -70,6 +70,13 @@ export default function SiteDetailScreen() {
       enabled: tab === 'seo',
     })
 
+  const { data: auditData, isLoading: auditLoading, refetch: refetchAudit } =
+    useQuery({
+      queryKey: ['seo-audit', id],
+      queryFn: () => api<SeoAuditData>(`/v1/sites/${id}/seo/audit`),
+      enabled: tab === 'seo',
+    })
+
   const usersData = site?.wp_users ?? []
 
   const site    = siteData?.site
@@ -87,7 +94,7 @@ export default function SiteDetailScreen() {
       tab === 'security' && refetchEvents(),
       tab === 'forms'    && refetchForms(),
       tab === 'vitals'   && refetchVitals(),
-      tab === 'seo'      && refetchSeo(),
+      tab === 'seo'      && Promise.all([refetchSeo(), refetchAudit()]),
     ])
   }
 
@@ -475,7 +482,76 @@ export default function SiteDetailScreen() {
                   </View>
                 )}
 
-                {!seoData?.connection && !seoLoading && (
+                {/* Audit summary */}
+                {auditData?.summary && (
+                  <View style={styles.card}>
+                    <View style={styles.cardHeader}>
+                      <Text style={styles.cardTitle}>Technical SEO audit</Text>
+                      <View style={[styles.scoreChip, { backgroundColor: scoreColor(auditData.summary.score ?? 0) }]}>
+                        <Text style={styles.scoreChipText}>{auditData.summary.score ?? '—'}</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.seoDate}>Crawled {new Date(auditData.summary.crawled_at).toLocaleDateString()}</Text>
+                    {Object.entries(auditData.summary.issue_counts)
+                      .filter(([, count]) => count > 0)
+                      .sort(([, a], [, b]) => b - a)
+                      .map(([issue, count]) => (
+                        <View key={issue} style={styles.infoRow}>
+                          <Text style={styles.infoLabel}>{ISSUE_LABELS[issue] ?? issue.replace(/_/g, ' ')}</Text>
+                          <Text style={[styles.infoValue, ISSUE_CRITICAL.includes(issue) ? { color: colors.critical } : { color: colors.warning }]}>
+                            {count}
+                          </Text>
+                        </View>
+                      ))
+                    }
+                    <Pressable
+                      style={[styles.connectBtn, styles.connectBtnSecondary, { marginTop: spacing.sm }]}
+                      onPress={() => api(`/v1/sites/${id}/seo/crawl`, { method: 'POST' }).catch(() => null)}
+                    >
+                      <Ionicons name="refresh-outline" size={15} color={colors.text} />
+                      <Text style={styles.connectBtnText}>Run crawl now</Text>
+                    </Pressable>
+                  </View>
+                )}
+
+                {/* Pages with issues */}
+                {auditData?.pages && auditData.pages.filter(p => p.issues.length > 0).length > 0 && (
+                  <View style={styles.card}>
+                    <Text style={styles.cardTitle}>Pages with issues</Text>
+                    {auditData.pages
+                      .filter(p => p.issues.length > 0)
+                      .slice(0, 20)
+                      .map((p, i) => (
+                        <View key={i} style={[styles.pageIssueRow, i > 0 && { borderTopWidth: 1, borderTopColor: colors.border }]}>
+                          <Text style={styles.pageIssueUrl} numberOfLines={1}>{p.url.replace(/^https?:\/\/[^/]+/, '')}</Text>
+                          <View style={styles.issueChips}>
+                            {p.issues.slice(0, 3).map(issue => (
+                              <View key={issue} style={[styles.issueChip, ISSUE_CRITICAL.includes(issue.split(':')[0]) && styles.issueChipCritical]}>
+                                <Text style={styles.issueChipText}>{ISSUE_LABELS[issue.split(':')[0]] ?? issue.split(':')[0]}</Text>
+                              </View>
+                            ))}
+                            {p.issues.length > 3 && <Text style={styles.muted}>+{p.issues.length - 3}</Text>}
+                          </View>
+                        </View>
+                      ))
+                    }
+                  </View>
+                )}
+
+                {!auditData?.summary && !auditLoading && (
+                  <View style={styles.card}>
+                    <Text style={styles.muted}>No crawl data yet.</Text>
+                    <Pressable
+                      style={[styles.connectBtn, { marginTop: spacing.sm }]}
+                      onPress={() => api(`/v1/sites/${id}/seo/crawl`, { method: 'POST' }).catch(() => null)}
+                    >
+                      <Ionicons name="search-outline" size={15} color={colors.text} />
+                      <Text style={styles.connectBtnText}>Run first crawl</Text>
+                    </Pressable>
+                  </View>
+                )}
+
+                {!seoData?.connection && !seoLoading && !auditData?.summary && (
                   <View style={styles.card}>
                     <Text style={styles.muted}>Connect GSC above to see traffic data.</Text>
                   </View>
@@ -494,6 +570,24 @@ const PLUGIN_LABELS: Record<string, string> = {
   wpforms: 'WPForms',
   cf7: 'Contact Form 7',
 }
+
+const ISSUE_LABELS: Record<string, string> = {
+  missing_title:     'Missing title',
+  title_too_long:    'Title too long',
+  missing_meta_desc: 'Missing meta desc',
+  meta_desc_too_long:'Meta desc too long',
+  missing_h1:        'Missing H1',
+  noindex:           'Noindex',
+  nofollow:          'Nofollow',
+  broken_link:       'Broken link',
+  redirect_chain:    'Redirect chain',
+  external_canonical:'External canonical',
+  missing_sitemap:   'No sitemap',
+  missing_alt:       'Missing alt text',
+  timeout:           'Timeout',
+}
+
+const ISSUE_CRITICAL = ['noindex', 'broken_link', 'missing_title', 'missing_sitemap']
 
 function scoreColor(score: number) {
   if (score >= 90) return '#166534'
@@ -612,4 +706,10 @@ const styles = StyleSheet.create({
   queryRowPriority: { backgroundColor: '#1e1e3f' },
   queryText:        { fontSize: 12, color: colors.text },
   queryNum:         { fontSize: 12, color: colors.muted, textAlign: 'right' },
+  pageIssueRow:     { paddingVertical: spacing.sm, gap: 4 },
+  pageIssueUrl:     { fontSize: 12, color: colors.muted },
+  issueChips:       { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
+  issueChip:        { backgroundColor: '#422006', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  issueChipCritical:{ backgroundColor: '#7f1d1d' },
+  issueChipText:    { fontSize: 10, fontWeight: '600', color: '#fca5a5' },
 })

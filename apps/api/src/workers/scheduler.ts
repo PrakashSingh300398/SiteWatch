@@ -1,6 +1,6 @@
 import { Worker } from 'bullmq'
 import { prisma } from '../lib/prisma'
-import { uptimeQueue, sslQueue, schedulerQueue, healthQueue, formsQueue, vitalsQueue, digestQueue, gscQueue, BULL_CONNECTION } from '../lib/queue'
+import { uptimeQueue, sslQueue, schedulerQueue, healthQueue, formsQueue, vitalsQueue, digestQueue, gscQueue, seoCrawlQueue, BULL_CONNECTION } from '../lib/queue'
 
 export async function startScheduler() {
   // Register the repeatable trigger — idempotent on restart
@@ -118,6 +118,27 @@ export async function startScheduler() {
           { siteId: site_id },
           { jobId: `gsc:${site_id}:${todayStr}` },
         )
+      }
+
+      // ── SEO crawl: once per week per paired site ───────────────────────────
+      const WEEK_MS = 7 * 24 * 3600 * 1000
+      const lastCrawlRows = await prisma.seoAuditSummary.groupBy({
+        by: ['site_id'],
+        _max: { crawled_at: true },
+      })
+      const lastCrawlMap = new Map(
+        lastCrawlRows.map(r => [r.site_id, r._max.crawled_at?.getTime() ?? 0]),
+      )
+      for (const site of sites) {
+        const lastCrawlMs = lastCrawlMap.get(site.id) ?? 0
+        if (now - lastCrawlMs >= WEEK_MS) {
+          const weekSlot = Math.floor(now / WEEK_MS)
+          await seoCrawlQueue.add(
+            'seo.crawl',
+            { siteId: site.id },
+            { jobId: `seocrawl:${site.id}:${weekSlot}` },
+          )
+        }
       }
     },
     { connection: BULL_CONNECTION, concurrency: 1 },

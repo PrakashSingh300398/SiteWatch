@@ -122,6 +122,28 @@ export interface WebVitalsRecord {
   measured_at: string
 }
 
+export interface SeoAuditSummary {
+  crawled_at: string
+  score: number | null
+  issue_counts: Record<string, number>
+}
+
+export interface CrawlPage {
+  url: string
+  crawled_at: string
+  title: string | null
+  meta_desc: string | null
+  canonical: string | null
+  robots: string | null
+  h1: string | null
+  issues: string[]
+}
+
+export interface SeoAuditData {
+  summary: SeoAuditSummary | null
+  pages: CrawlPage[]
+}
+
 export interface SeoData {
   connection: {
     google_email: string

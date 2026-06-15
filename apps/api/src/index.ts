@@ -89,6 +89,7 @@ async function main() {
       workers.healthWorker.close(),
       workers.vulnWorker.close(),
       workers.gscWorker.close(),
+      workers.crawlWorker.close(),
     ])
     await app.close()
     await prisma.$disconnect()

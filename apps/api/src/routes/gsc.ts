@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { prisma } from '../lib/prisma'
 import { encrypt, decrypt } from '../lib/crypto'
-import { gscQueue } from '../lib/queue'
+import { gscQueue, seoCrawlQueue } from '../lib/queue'
 
 const SCOPES = [
   'https://www.googleapis.com/auth/webmasters.readonly',
@@ -243,5 +243,38 @@ export default async function gscRoutes(fastify: FastifyInstance) {
         clicksWoW,
       },
     })
+  })
+
+  // GET /v1/sites/:id/seo/audit — latest crawl results + page issues
+  fastify.get('/v1/sites/:id/seo/audit', { preHandler: authenticate }, async (req, reply) => {
+    const { id } = req.params as { id: string }
+    const site = await prisma.site.findFirst({ where: { id, org_id: req.user.orgId }, select: { id: true } })
+    if (!site) return reply.status(404).send({ error: 'Not found' })
+
+    const [summary, pages] = await Promise.all([
+      prisma.seoAuditSummary.findFirst({
+        where: { site_id: id },
+        orderBy: { crawled_at: 'desc' },
+        select: { crawled_at: true, score: true, issue_counts: true },
+      }),
+      prisma.crawlPage.findMany({
+        where: { site_id: id },
+        orderBy: { crawled_at: 'desc' },
+        select: { url: true, crawled_at: true, title: true, meta_desc: true, canonical: true, robots: true, h1: true, issues: true },
+        take: 200,
+      }),
+    ])
+
+    return reply.send({ summary, pages })
+  })
+
+  // POST /v1/sites/:id/seo/crawl — trigger manual crawl
+  fastify.post('/v1/sites/:id/seo/crawl', { preHandler: authenticate }, async (req, reply) => {
+    const { id } = req.params as { id: string }
+    const site = await prisma.site.findFirst({ where: { id, org_id: req.user.orgId }, select: { id: true, paired_at: true } })
+    if (!site) return reply.status(404).send({ error: 'Not found' })
+    if (!site.paired_at) return reply.status(400).send({ error: 'Site not paired' })
+    await seoCrawlQueue.add('seo.crawl', { siteId: id }, { jobId: `seocrawl:${id}:manual:${Date.now()}` })
+    return reply.send({ ok: true, message: 'Crawl queued' })
   })
 }
