@@ -11,6 +11,7 @@ import devicesRoutes from './routes/devices'
 import dashboardRoutes from './routes/dashboard'
 import alertsRoutes from './routes/alerts'
 import eventsRoutes from './routes/events'
+import teamRoutes from './routes/team'
 import { startWorkers } from './workers/index'
 
 const isProd = process.env.NODE_ENV === 'production'
@@ -51,6 +52,7 @@ async function main() {
   await app.register(dashboardRoutes)
   await app.register(alertsRoutes)
   await app.register(eventsRoutes)
+  await app.register(teamRoutes)
 
   // ── Healthcheck ────────────────────────────────────────────────────────────
   app.get('/health', async (_req, reply) => {

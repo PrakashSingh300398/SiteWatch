@@ -11,9 +11,10 @@ const REFRESH_TTL_SEC = 30 * 24 * 60 * 60 // 30 days
 // ─── Schemas ──────────────────────────────────────────────────────────────────
 
 const registerBody = z.object({
-  orgName: z.string().min(2).max(100),
+  orgName: z.string().min(2).max(100).optional(),
   email: z.string().email(),
   password: z.string().min(8).max(100),
+  inviteToken: z.string().uuid().optional(),
 })
 
 const loginBody = z.object({
@@ -55,26 +56,49 @@ export default async function authRoutes(fastify: FastifyInstance) {
     const parsed = registerBody.safeParse(req.body)
     if (!parsed.success) return reply.status(400).send({ error: parsed.error.flatten() })
 
-    const { orgName, email, password } = parsed.data
+    const { orgName, email, password, inviteToken } = parsed.data
 
     const taken = await prisma.user.findUnique({ where: { email } })
     if (taken) return reply.status(409).send({ error: 'Email already registered' })
 
     const password_hash = await bcrypt.hash(password, 12)
-    const org = await prisma.organization.create({ data: { name: orgName } })
+
+    let orgId: string
+    let role: 'owner' | 'member' = 'owner'
+
+    if (inviteToken) {
+      const invitation = await prisma.invitation.findUnique({
+        where: { token: inviteToken },
+        include: { org: { select: { id: true } } },
+      })
+      if (!invitation) return reply.status(404).send({ error: 'Invite not found' })
+      if (invitation.accepted_at) return reply.status(410).send({ error: 'Invite already used' })
+      if (invitation.expires_at < new Date()) return reply.status(410).send({ error: 'Invite expired' })
+      if (invitation.email.toLowerCase() !== email.toLowerCase()) {
+        return reply.status(403).send({ error: 'Invite email does not match' })
+      }
+      orgId = invitation.org.id
+      role = invitation.role as 'owner' | 'member'
+      await prisma.invitation.update({ where: { id: invitation.id }, data: { accepted_at: new Date() } })
+    } else {
+      if (!orgName) return reply.status(400).send({ error: 'orgName required when registering without invite' })
+      const org = await prisma.organization.create({ data: { name: orgName } })
+      orgId = org.id
+    }
+
     const user = await prisma.user.create({
-      data: { org_id: org.id, email, password_hash, role: 'owner' },
+      data: { org_id: orgId, email, password_hash, role },
     })
 
     const jti = randomUUID()
-    const accessToken = issueAccessToken(user.id, org.id, user.role)
+    const accessToken = issueAccessToken(user.id, user.org_id, user.role)
     const refreshToken = issueRefreshToken(user.id, jti)
     await saveRefresh(user.id, jti)
 
     return reply.status(201).send({
       accessToken,
       refreshToken,
-      user: { id: user.id, email, role: user.role, orgId: org.id },
+      user: { id: user.id, email, role: user.role, orgId: user.org_id },
     })
   })
 

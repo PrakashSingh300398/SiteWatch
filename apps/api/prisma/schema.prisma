@@ -66,11 +66,29 @@ model Organization {
   last_digest_at DateTime?
   created_at     DateTime  @default(now())
 
-  users  User[]
-  sites  Site[]
-  alerts Alert[]
+  users       User[]
+  sites       Site[]
+  alerts      Alert[]
+  invitations Invitation[]
 
   @@map("organizations")
+}
+
+model Invitation {
+  id          String    @id @default(uuid())
+  org_id      String
+  email       String
+  role        UserRole  @default(member)
+  token       String    @unique @default(uuid())
+  invited_by  String
+  created_at  DateTime  @default(now())
+  expires_at  DateTime
+  accepted_at DateTime?
+
+  org Organization @relation(fields: [org_id], references: [id], onDelete: Cascade)
+
+  @@unique([org_id, email])
+  @@map("invitations")
 }
 
 model User {

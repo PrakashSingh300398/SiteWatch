@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { prisma } from '../lib/prisma'
 import { uptimeQueue, sslQueue, healthQueue } from '../lib/queue'
 import { verifyAgentRequest } from '../lib/hmac'
+import { generateSiteReport } from '../lib/report'
 
 const PAIRING_TTL_MS = 15 * 60 * 1000 // 15 minutes
 
@@ -344,5 +345,25 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
       },
     })
     return reply.send(vitals)
+  })
+
+  // GET /v1/sites/:id/report?month=YYYY-MM — returns PDF
+  fastify.get('/v1/sites/:id/report', { preHandler: authenticate }, async (req, reply) => {
+    const { id } = req.params as { id: string }
+    const { month } = req.query as { month?: string }
+
+    const site = await prisma.site.findFirst({ where: { id, org_id: req.user.orgId }, select: { id: true, name: true } })
+    if (!site) return reply.status(404).send({ error: 'Not found' })
+
+    const targetMonth = month ?? new Date().toISOString().slice(0, 7)
+    if (!/^\d{4}-\d{2}$/.test(targetMonth)) {
+      return reply.status(400).send({ error: 'month must be YYYY-MM' })
+    }
+
+    const stream = await generateSiteReport(id, targetMonth)
+    const safeName = site.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()
+    reply.header('Content-Type', 'application/pdf')
+    reply.header('Content-Disposition', `attachment; filename="sitewatch-${safeName}-${targetMonth}.pdf"`)
+    return reply.send(stream)
   })
 }

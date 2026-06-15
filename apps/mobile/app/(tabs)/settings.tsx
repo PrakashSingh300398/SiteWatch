@@ -17,6 +17,26 @@ interface AddSiteResult {
   pairingCode: string
 }
 
+interface TeamMember {
+  id: string
+  email: string
+  role: 'owner' | 'member'
+  created_at: string
+}
+
+interface Invitation {
+  id: string
+  email: string
+  role: 'owner' | 'member'
+  created_at: string
+  expires_at: string
+}
+
+interface TeamData {
+  members: TeamMember[]
+  invitations: Invitation[]
+}
+
 export default function SettingsScreen() {
   const { user, signOut } = useAuthContext()
   const qc = useQueryClient()
@@ -28,9 +48,21 @@ export default function SettingsScreen() {
   const [pairingCode, setPairing] = useState<string | null>(null)
   const [addError, setAddError]   = useState<string | null>(null)
 
+  // Invite modal state
+  const [showInvite, setShowInvite]     = useState(false)
+  const [inviteEmail, setInviteEmail]   = useState('')
+  const [inviteRole, setInviteRole]     = useState<'member' | 'owner'>('member')
+  const [inviteError, setInviteError]   = useState<string | null>(null)
+  const [inviteSent, setInviteSent]     = useState(false)
+
   const { data: sitesData } = useQuery({
     queryKey: ['sites'],
     queryFn: () => api<{ sites: Site[] }>('/v1/sites'),
+  })
+
+  const { data: teamData } = useQuery({
+    queryKey: ['team'],
+    queryFn: () => api<TeamData>('/v1/team'),
   })
 
   const addMutation = useMutation({
@@ -45,6 +77,28 @@ export default function SettingsScreen() {
     onError: (e: Error) => setAddError(e.message),
   })
 
+  const inviteMutation = useMutation({
+    mutationFn: () => api('/v1/team/invite', {
+      method: 'POST',
+      body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
+    }),
+    onSuccess: () => {
+      setInviteSent(true)
+      qc.invalidateQueries({ queryKey: ['team'] })
+    },
+    onError: (e: Error) => setInviteError(e.message),
+  })
+
+  const cancelInviteMutation = useMutation({
+    mutationFn: (inviteId: string) => api(`/v1/team/invitations/${inviteId}`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['team'] }),
+  })
+
+  const removeMemberMutation = useMutation({
+    mutationFn: (memberId: string) => api(`/v1/team/${memberId}`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['team'] }),
+  })
+
   const resetModal = () => {
     setShowAdd(false)
     setPairing(null)
@@ -53,7 +107,18 @@ export default function SettingsScreen() {
     setAddError(null)
   }
 
-  const sites = sitesData?.sites ?? []
+  const resetInvite = () => {
+    setShowInvite(false)
+    setInviteEmail('')
+    setInviteRole('member')
+    setInviteError(null)
+    setInviteSent(false)
+  }
+
+  const sites   = sitesData?.sites ?? []
+  const members = teamData?.members ?? []
+  const invitations = teamData?.invitations ?? []
+  const isOwner = user?.role === 'owner'
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -65,6 +130,7 @@ export default function SettingsScreen() {
           <View style={styles.row}>
             <Ionicons name="person-circle-outline" size={20} color={colors.muted} />
             <Text style={styles.rowText}>{user?.email}</Text>
+            <Text style={styles.roleChip}>{user?.role}</Text>
           </View>
           <View style={styles.divider} />
           <Pressable style={styles.row} onPress={() => {
@@ -108,6 +174,66 @@ export default function SettingsScreen() {
             </React.Fragment>
           ))}
         </View>
+
+        {/* Team */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Team ({members.length})</Text>
+          {isOwner && (
+            <Pressable style={styles.addBtn} onPress={() => setShowInvite(true)}>
+              <Ionicons name="person-add-outline" size={16} color={colors.text} />
+              <Text style={styles.addBtnText}>Invite</Text>
+            </Pressable>
+          )}
+        </View>
+
+        <View style={styles.card}>
+          {members.map((m, i) => (
+            <React.Fragment key={m.id}>
+              {i > 0 && <View style={styles.divider} />}
+              <View style={styles.row}>
+                <Ionicons name="person-outline" size={18} color={colors.muted} />
+                <View style={styles.siteInfo}>
+                  <Text style={styles.rowText} numberOfLines={1}>{m.email}</Text>
+                  <Text style={styles.siteUrl}>{m.role}</Text>
+                </View>
+                {isOwner && m.id !== user?.id && (
+                  <Pressable onPress={() => {
+                    Alert.alert('Remove member', `Remove ${m.email}?`, [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Remove', style: 'destructive', onPress: () => removeMemberMutation.mutate(m.id) },
+                    ])
+                  }}>
+                    <Ionicons name="trash-outline" size={18} color={colors.critical} />
+                  </Pressable>
+                )}
+              </View>
+            </React.Fragment>
+          ))}
+        </View>
+
+        {/* Pending invitations */}
+        {isOwner && invitations.length > 0 && (
+          <>
+            <Text style={styles.sectionTitle}>Pending Invitations</Text>
+            <View style={styles.card}>
+              {invitations.map((inv, i) => (
+                <React.Fragment key={inv.id}>
+                  {i > 0 && <View style={styles.divider} />}
+                  <View style={styles.row}>
+                    <Ionicons name="mail-outline" size={18} color={colors.muted} />
+                    <View style={styles.siteInfo}>
+                      <Text style={styles.rowText} numberOfLines={1}>{inv.email}</Text>
+                      <Text style={styles.siteUrl}>{inv.role} · expires {new Date(inv.expires_at).toLocaleDateString()}</Text>
+                    </View>
+                    <Pressable onPress={() => cancelInviteMutation.mutate(inv.id)}>
+                      <Ionicons name="close-circle-outline" size={20} color={colors.muted} />
+                    </Pressable>
+                  </View>
+                </React.Fragment>
+              ))}
+            </View>
+          </>
+        )}
 
       </ScrollView>
 
@@ -180,40 +306,121 @@ export default function SettingsScreen() {
           )}
         </View>
       </Modal>
+
+      {/* Invite Modal */}
+      <Modal visible={showInvite} animationType="slide" presentationStyle="pageSheet" onRequestClose={resetInvite}>
+        <View style={styles.modal}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Invite team member</Text>
+            <Pressable onPress={resetInvite}>
+              <Ionicons name="close" size={24} color={colors.text} />
+            </Pressable>
+          </View>
+
+          {inviteSent ? (
+            <View style={styles.pairingSuccess}>
+              <Ionicons name="checkmark-circle" size={48} color={colors.up} />
+              <Text style={styles.pairingTitle}>Invitation sent!</Text>
+              <Text style={styles.pairingInstructions}>
+                An email has been sent to {inviteEmail}.{'\n'}
+                The link expires in 7 days.
+              </Text>
+              <Pressable style={styles.btn} onPress={resetInvite}>
+                <Text style={styles.btnText}>Done</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <View style={styles.form}>
+              {inviteError && <Text style={styles.formError}>{inviteError}</Text>}
+
+              <View style={styles.field}>
+                <Text style={styles.fieldLabel}>Email address</Text>
+                <TextInput
+                  style={styles.input}
+                  value={inviteEmail}
+                  onChangeText={setInviteEmail}
+                  placeholder="colleague@example.com"
+                  placeholderTextColor={colors.dim}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+              </View>
+
+              <View style={styles.field}>
+                <Text style={styles.fieldLabel}>Role</Text>
+                <View style={styles.roleToggle}>
+                  {(['member', 'owner'] as const).map(r => (
+                    <Pressable
+                      key={r}
+                      style={[styles.roleOption, inviteRole === r && styles.roleOptionActive]}
+                      onPress={() => setInviteRole(r)}
+                    >
+                      <Text style={[styles.roleOptionText, inviteRole === r && styles.roleOptionTextActive]}>
+                        {r.charAt(0).toUpperCase() + r.slice(1)}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <Text style={styles.roleHint}>
+                  {inviteRole === 'owner' ? 'Full access — can invite/remove members and manage billing.' : 'Can view all sites and alerts, cannot change team settings.'}
+                </Text>
+              </View>
+
+              <Pressable
+                style={[styles.btn, (inviteMutation.isPending || !inviteEmail) && styles.btnDisabled]}
+                onPress={() => inviteMutation.mutate()}
+                disabled={inviteMutation.isPending || !inviteEmail}
+              >
+                {inviteMutation.isPending
+                  ? <ActivityIndicator color={colors.text} size="small" />
+                  : <Text style={styles.btnText}>Send invitation</Text>
+                }
+              </Pressable>
+            </View>
+          )}
+        </View>
+      </Modal>
     </SafeAreaView>
   )
 }
 
 const styles = StyleSheet.create({
-  safe:         { flex: 1, backgroundColor: colors.bg },
-  container:    { padding: spacing.md, gap: spacing.md },
-  sectionTitle: { fontSize: 13, fontWeight: '600', color: colors.muted, textTransform: 'uppercase', letterSpacing: 0.5 },
-  sectionHeader:{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  card:         { backgroundColor: colors.surface, borderRadius: radius.md, overflow: 'hidden' },
-  row:          { flexDirection: 'row', alignItems: 'center', padding: spacing.md, gap: spacing.sm },
-  rowText:      { fontSize: 15, color: colors.text, flex: 1 },
-  divider:      { height: 1, backgroundColor: colors.border, marginLeft: spacing.md },
-  statusDot:    { width: 10, height: 10, borderRadius: 5 },
-  siteInfo:     { flex: 1, minWidth: 0 },
-  siteUrl:      { fontSize: 12, color: colors.muted, marginTop: 1 },
-  pairedTag:    { fontSize: 12, fontWeight: '500', marginRight: spacing.xs },
-  addBtn:       { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, backgroundColor: colors.accent, borderRadius: radius.sm, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
-  addBtnText:   { fontSize: 13, fontWeight: '600', color: colors.text },
-  empty:        { padding: spacing.md, color: colors.muted, fontSize: 14 },
-  modal:        { flex: 1, backgroundColor: colors.bg, padding: spacing.lg },
-  modalHeader:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.lg },
-  modalTitle:   { fontSize: 20, fontWeight: '700', color: colors.text },
-  form:         { gap: spacing.md },
-  formError:    { fontSize: 13, color: colors.critical, backgroundColor: '#3f0a0a', padding: spacing.sm, borderRadius: radius.sm },
-  field:        { gap: spacing.xs },
-  fieldLabel:   { fontSize: 13, fontWeight: '500', color: colors.muted },
-  input:        { backgroundColor: colors.surface, borderRadius: radius.sm, padding: spacing.md, color: colors.text, fontSize: 15 },
-  btn:          { backgroundColor: colors.accent, borderRadius: radius.md, padding: spacing.md, alignItems: 'center' },
-  btnDisabled:  { opacity: 0.5 },
-  btnText:      { color: colors.text, fontWeight: '600', fontSize: 15 },
-  pairingSuccess:{ alignItems: 'center', gap: spacing.md, paddingVertical: spacing.xl },
-  pairingTitle: { fontSize: 22, fontWeight: '700', color: colors.text },
-  pairingLabel: { fontSize: 13, color: colors.muted },
-  pairingCode:  { fontSize: 40, fontWeight: '800', color: colors.accent, letterSpacing: 8 },
-  pairingInstructions: { fontSize: 14, color: colors.muted, lineHeight: 22, textAlign: 'center', paddingHorizontal: spacing.md },
+  safe:               { flex: 1, backgroundColor: colors.bg },
+  container:          { padding: spacing.md, gap: spacing.md },
+  sectionTitle:       { fontSize: 13, fontWeight: '600', color: colors.muted, textTransform: 'uppercase', letterSpacing: 0.5 },
+  sectionHeader:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  card:               { backgroundColor: colors.surface, borderRadius: radius.md, overflow: 'hidden' },
+  row:                { flexDirection: 'row', alignItems: 'center', padding: spacing.md, gap: spacing.sm },
+  rowText:            { fontSize: 15, color: colors.text, flex: 1 },
+  divider:            { height: 1, backgroundColor: colors.border, marginLeft: spacing.md },
+  statusDot:          { width: 10, height: 10, borderRadius: 5 },
+  siteInfo:           { flex: 1, minWidth: 0 },
+  siteUrl:            { fontSize: 12, color: colors.muted, marginTop: 1 },
+  pairedTag:          { fontSize: 12, fontWeight: '500', marginRight: spacing.xs },
+  addBtn:             { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, backgroundColor: colors.accent, borderRadius: radius.sm, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
+  addBtnText:         { fontSize: 13, fontWeight: '600', color: colors.text },
+  empty:              { padding: spacing.md, color: colors.muted, fontSize: 14 },
+  roleChip:           { fontSize: 11, fontWeight: '600', color: colors.accent, backgroundColor: '#1e1e3f', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
+  modal:              { flex: 1, backgroundColor: colors.bg, padding: spacing.lg },
+  modalHeader:        { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.lg },
+  modalTitle:         { fontSize: 20, fontWeight: '700', color: colors.text },
+  form:               { gap: spacing.md },
+  formError:          { fontSize: 13, color: colors.critical, backgroundColor: '#3f0a0a', padding: spacing.sm, borderRadius: radius.sm },
+  field:              { gap: spacing.xs },
+  fieldLabel:         { fontSize: 13, fontWeight: '500', color: colors.muted },
+  input:              { backgroundColor: colors.surface, borderRadius: radius.sm, padding: spacing.md, color: colors.text, fontSize: 15 },
+  btn:                { backgroundColor: colors.accent, borderRadius: radius.md, padding: spacing.md, alignItems: 'center' },
+  btnDisabled:        { opacity: 0.5 },
+  btnText:            { color: colors.text, fontWeight: '600', fontSize: 15 },
+  pairingSuccess:     { alignItems: 'center', gap: spacing.md, paddingVertical: spacing.xl },
+  pairingTitle:       { fontSize: 22, fontWeight: '700', color: colors.text },
+  pairingLabel:       { fontSize: 13, color: colors.muted },
+  pairingCode:        { fontSize: 40, fontWeight: '800', color: colors.accent, letterSpacing: 8 },
+  pairingInstructions:{ fontSize: 14, color: colors.muted, lineHeight: 22, textAlign: 'center', paddingHorizontal: spacing.md },
+  roleToggle:         { flexDirection: 'row', gap: spacing.sm },
+  roleOption:         { flex: 1, padding: spacing.sm, borderRadius: radius.sm, backgroundColor: colors.surface, alignItems: 'center', borderWidth: 1, borderColor: colors.border },
+  roleOptionActive:   { backgroundColor: '#1e1e3f', borderColor: colors.accent },
+  roleOptionText:     { fontSize: 14, color: colors.muted, fontWeight: '500' },
+  roleOptionTextActive:{ color: colors.accent },
+  roleHint:           { fontSize: 12, color: colors.muted, lineHeight: 18 },
 })

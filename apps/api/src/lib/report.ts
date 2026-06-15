@@ -1,0 +1,192 @@
+import PDFDocument from 'pdfkit'
+import type { Readable } from 'node:stream'
+import { prisma } from './prisma'
+
+const ACCENT  = '#6366f1'
+const BG      = '#0f0f0f'
+const TEXT    = '#e5e5e5'
+const MUTED   = '#6b7280'
+const SUCCESS = '#22c55e'
+const WARNING = '#f59e0b'
+const DANGER  = '#ef4444'
+
+export async function generateSiteReport(siteId: string, month: string): Promise<Readable> {
+  // month = 'YYYY-MM'
+  const [year, mon] = month.split('-').map(Number)
+  const start = new Date(year, mon - 1, 1)
+  const end   = new Date(year, mon, 1)
+
+  const [site, uptimeChecks, events, alerts, forms, vitals] = await Promise.all([
+    prisma.site.findUnique({
+      where: { id: siteId },
+      include: { ssl_status: true, plugins: { where: { update_available: true } } },
+    }),
+    prisma.uptimeCheck.findMany({
+      where: { site_id: siteId, checked_at: { gte: start, lt: end } },
+      select: { ok: true, response_ms: true },
+    }),
+    prisma.event.findMany({
+      where: { site_id: siteId, occurred_at: { gte: start, lt: end }, severity: { in: ['warning', 'critical'] } },
+      orderBy: { occurred_at: 'asc' },
+      select: { type: true, severity: true, occurred_at: true, data: true },
+      take: 50,
+    }),
+    prisma.alert.findMany({
+      where: { site_id: siteId, created_at: { gte: start, lt: end } },
+      orderBy: { created_at: 'asc' },
+      select: { title: true, severity: true, created_at: true, resolved_at: true },
+      take: 30,
+    }),
+    prisma.formMonitor.findMany({
+      where: { site_id: siteId },
+      select: { form_name: true, count_7d: true, baseline_daily: true, alert_state: true },
+    }),
+    prisma.webVitals.findFirst({
+      where: { site_id: siteId },
+      orderBy: { measured_at: 'desc' },
+    }),
+  ])
+
+  if (!site) throw new Error('Site not found')
+
+  const totalChecks = uptimeChecks.length
+  const okChecks    = uptimeChecks.filter(c => c.ok).length
+  const uptimePct   = totalChecks > 0 ? (okChecks / totalChecks) * 100 : null
+  const avgMs       = uptimeChecks.filter(c => c.response_ms).length > 0
+    ? Math.round(uptimeChecks.reduce((s, c) => s + (c.response_ms ?? 0), 0) / uptimeChecks.filter(c => c.response_ms).length)
+    : null
+
+  const monthLabel = new Date(year, mon - 1, 1).toLocaleDateString('en-CA', { year: 'numeric', month: 'long' })
+
+  const doc = new PDFDocument({ size: 'A4', margin: 50, info: { Title: `SiteWatch Report — ${site.name} — ${monthLabel}` } })
+
+  // ── Cover / header ─────────────────────────────────────────────────────────
+  doc.rect(0, 0, doc.page.width, 120).fill('#1a1a2e')
+  doc.fill(ACCENT).fontSize(22).font('Helvetica-Bold').text('SiteWatch', 50, 35)
+  doc.fill('#ffffff').fontSize(11).font('Helvetica').text('Monthly Performance Report', 50, 62)
+  doc.fill('#aaaacc').fontSize(10).text(`${site.name}  ·  ${monthLabel}`, 50, 80)
+  doc.fill('#aaaacc').fontSize(9).text(site.url, 50, 96)
+
+  let y = 145
+
+  // ── Uptime summary ─────────────────────────────────────────────────────────
+  y = section(doc, 'Uptime & Performance', y)
+
+  const uptimeColor = uptimePct == null ? MUTED : uptimePct >= 99.9 ? SUCCESS : uptimePct >= 99 ? WARNING : DANGER
+  row(doc, 'Uptime', uptimePct != null ? `${uptimePct.toFixed(3)}%` : 'No data', y, uptimeColor); y += 22
+  row(doc, 'Total checks', String(totalChecks), y); y += 22
+  row(doc, 'Avg response time', avgMs != null ? `${avgMs}ms` : '—', y); y += 22
+  row(doc, 'Downtime incidents', String(alerts.filter(a => a.title.toLowerCase().includes('down')).length), y); y += 30
+
+  // ── Alerts this month ──────────────────────────────────────────────────────
+  y = section(doc, 'Alerts This Month', y)
+  if (alerts.length === 0) {
+    doc.fill(MUTED).fontSize(10).text('No alerts this month.', 50, y); y += 20
+  } else {
+    for (const a of alerts.slice(0, 12)) {
+      const color = a.severity === 'critical' ? DANGER : WARNING
+      const resolved = a.resolved_at ? ` → resolved ${fmt(a.resolved_at)}` : ' (open)'
+      doc.fill(color).fontSize(9).font('Helvetica-Bold').text('●', 50, y + 1)
+      doc.fill(TEXT).fontSize(9).font('Helvetica').text(`${fmt(a.created_at)}  ${a.title}${resolved}`, 65, y, { width: 480 })
+      y += 16
+      if (y > doc.page.height - 80) { doc.addPage(); y = 50 }
+    }
+    y += 10
+  }
+
+  // ── Security ───────────────────────────────────────────────────────────────
+  y = section(doc, 'Security', y)
+  row(doc, 'Security score', site.security_score != null ? `${site.security_score}/100` : 'Not scanned',
+    y, site.security_score != null ? (site.security_score >= 80 ? SUCCESS : site.security_score >= 60 ? WARNING : DANGER) : MUTED); y += 22
+  row(doc, 'Plugins with updates', String(site.plugins.length), y, site.plugins.length > 0 ? WARNING : SUCCESS); y += 22
+  const sslDays = site.ssl_status?.expires_at
+    ? Math.ceil((new Date(site.ssl_status.expires_at).getTime() - Date.now()) / 86_400_000)
+    : null
+  row(doc, 'SSL expires', sslDays != null ? `${sslDays} days` : '—', y, sslDays != null && sslDays < 14 ? WARNING : SUCCESS); y += 30
+
+  if (y > doc.page.height - 150) { doc.addPage(); y = 50 }
+
+  // ── Updates applied ────────────────────────────────────────────────────────
+  const updateEvents = events.filter(e => e.type === 'plugin.updated' || e.type === 'core.updated')
+  y = section(doc, `Updates Applied (${updateEvents.length})`, y)
+  if (updateEvents.length === 0) {
+    doc.fill(MUTED).fontSize(10).text('No updates recorded this month.', 50, y); y += 20
+  } else {
+    for (const e of updateEvents.slice(0, 10)) {
+      const d = e.data as Record<string, unknown> | null
+      const name = String(d?.name ?? (d?.plugins as string[])?.[0] ?? e.type)
+      doc.fill(MUTED).fontSize(9).text(`${fmt(e.occurred_at)}`, 50, y)
+      doc.fill(TEXT).fontSize(9).text(name, 150, y); y += 15
+      if (y > doc.page.height - 80) { doc.addPage(); y = 50 }
+    }
+    y += 10
+  }
+
+  // ── Forms ──────────────────────────────────────────────────────────────────
+  if (forms.length > 0) {
+    if (y > doc.page.height - 150) { doc.addPage(); y = 50 }
+    y = section(doc, 'Form Submissions', y)
+    for (const f of forms) {
+      const baseline = f.baseline_daily ? `${Number(f.baseline_daily).toFixed(1)}/day baseline` : 'no baseline yet'
+      const status   = f.alert_state === 'stopped' ? ' ⚠ STOPPED' : ''
+      row(doc, f.form_name, `${f.count_7d} last 7d  ·  ${baseline}${status}`, y,
+        f.alert_state === 'stopped' ? WARNING : TEXT); y += 22
+    }
+    y += 10
+  }
+
+  // ── Core Web Vitals ────────────────────────────────────────────────────────
+  if (y > doc.page.height - 150) { doc.addPage(); y = 50 }
+  y = section(doc, 'Core Web Vitals (Mobile)', y)
+  if (!vitals) {
+    doc.fill(MUTED).fontSize(10).text('No vitals data yet. Add PSI_API_KEY to enable weekly scans.', 50, y); y += 20
+  } else {
+    const perfColor = vitals.performance == null ? MUTED : vitals.performance >= 90 ? SUCCESS : vitals.performance >= 50 ? WARNING : DANGER
+    row(doc, 'Performance score', vitals.performance != null ? String(vitals.performance) : '—', y, perfColor); y += 22
+    row(doc, 'LCP (Largest Contentful Paint)', vitals.lcp_ms != null ? `${(vitals.lcp_ms / 1000).toFixed(2)}s` : '—', y); y += 22
+    row(doc, 'CLS (Cumulative Layout Shift)',  vitals.cls   != null ? vitals.cls.toFixed(3) : '—', y); y += 22
+    row(doc, 'INP (Interaction to Next Paint)', vitals.inp_ms != null ? `${vitals.inp_ms}ms` : '—', y); y += 30
+  }
+
+  // ── AI executive summary placeholder ──────────────────────────────────────
+  if (y > doc.page.height - 120) { doc.addPage(); y = 50 }
+  y = section(doc, 'Executive Summary', y)
+  doc.rect(50, y, doc.page.width - 100, 70).fill('#1a1a2e')
+  doc.fill(MUTED).fontSize(10).font('Helvetica').text(
+    'AI-generated executive summary will appear here in a future update.',
+    60, y + 12, { width: doc.page.width - 120 }
+  )
+  doc.fill(ACCENT).fontSize(9).text('Powered by Claude AI · Coming in Phase 3', 60, y + 44)
+  y += 90
+
+  // ── Footer ─────────────────────────────────────────────────────────────────
+  const pages = doc.bufferedPageRange()
+  for (let i = 0; i < pages.count; i++) {
+    doc.switchToPage(pages.start + i)
+    doc.fill(MUTED).fontSize(8).text(
+      `SiteWatch by Code to Click  ·  Generated ${new Date().toLocaleDateString('en-CA')}  ·  Page ${i + 1} of ${pages.count}`,
+      50, doc.page.height - 35, { align: 'center', width: doc.page.width - 100 }
+    )
+  }
+
+  doc.end()
+  return doc as unknown as Readable
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function section(doc: PDFKit.PDFDocument, title: string, y: number): number {
+  doc.fill(ACCENT).rect(50, y, doc.page.width - 100, 24).fill('#1e1e3f')
+  doc.fill(ACCENT).fontSize(11).font('Helvetica-Bold').text(title, 58, y + 7)
+  doc.fill(TEXT).font('Helvetica')
+  return y + 34
+}
+
+function row(doc: PDFKit.PDFDocument, label: string, value: string, y: number, valueColor = TEXT) {
+  doc.fill(MUTED).fontSize(10).text(label, 58, y, { width: 220 })
+  doc.fill(valueColor).fontSize(10).text(value, 285, y, { width: 260, align: 'right' })
+}
+
+function fmt(d: Date) {
+  return d.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })
+}
