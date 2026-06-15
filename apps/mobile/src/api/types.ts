@@ -121,3 +121,38 @@ export interface WebVitalsRecord {
   strategy: 'mobile' | 'desktop'
   measured_at: string
 }
+
+export interface SeoData {
+  connection: {
+    google_email: string
+    property_url: string
+    status: 'active' | 'expired' | 'revoked'
+    connected_at: string
+  } | null
+  daily: Array<{
+    date: string
+    clicks: number
+    impressions: number
+    ctr: number | null
+    avg_position: number | null
+  }>
+  queries: Array<{
+    query: string
+    clicks: number
+    impressions: number
+    position: number | null
+    is_priority: boolean
+  }>
+  indexStatus: {
+    date: string
+    indexed_count: number
+    excluded_noindex: number
+    crawled_not_indexed: number
+    server_errors: number
+  } | null
+  summary: {
+    last7Clicks: number
+    prev7Clicks: number
+    clicksWoW: number | null
+  }
+}

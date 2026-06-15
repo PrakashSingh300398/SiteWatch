@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import {
   View, Text, StyleSheet, ScrollView, Pressable,
-  RefreshControl, ActivityIndicator, FlatList,
+  RefreshControl, ActivityIndicator, Linking,
 } from 'react-native'
 import { useLocalSearchParams, Stack } from 'expo-router'
 import { useQuery, useInfiniteQuery } from '@tanstack/react-query'
@@ -11,9 +11,9 @@ import { UptimeChart, ResponseSparkline } from '../../src/components/UptimeChart
 import { ScoreGauge } from '../../src/components/ScoreGauge'
 import { StatusDot } from '../../src/components/StatusDot'
 import { colors, spacing, radius, severityColor } from '../../src/theme'
-import type { SiteDetail, UptimeCheck, SiteEvent, Plugin, FormMonitorRecord, WebVitalsRecord, WpUserRecord } from '../../src/api/types'
+import type { SiteDetail, UptimeCheck, SiteEvent, Plugin, FormMonitorRecord, WebVitalsRecord, WpUserRecord, SeoData } from '../../src/api/types'
 
-type Tab = 'overview' | 'security' | 'forms' | 'vitals'
+type Tab = 'overview' | 'security' | 'forms' | 'vitals' | 'seo'
 
 export default function SiteDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
@@ -63,6 +63,13 @@ export default function SiteDetailScreen() {
       enabled: tab === 'vitals',
     })
 
+  const { data: seoData, isLoading: seoLoading, refetch: refetchSeo } =
+    useQuery({
+      queryKey: ['seo', id],
+      queryFn: () => api<SeoData>(`/v1/sites/${id}/seo`),
+      enabled: tab === 'seo',
+    })
+
   const usersData = site?.wp_users ?? []
 
   const site    = siteData?.site
@@ -80,6 +87,7 @@ export default function SiteDetailScreen() {
       tab === 'security' && refetchEvents(),
       tab === 'forms'    && refetchForms(),
       tab === 'vitals'   && refetchVitals(),
+      tab === 'seo'      && refetchSeo(),
     ])
   }
 
@@ -117,15 +125,15 @@ export default function SiteDetailScreen() {
         )}
 
         {/* Tab bar */}
-        <View style={styles.tabBar}>
-          {(['overview', 'security', 'forms', 'vitals'] as Tab[]).map(t => (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabBar} contentContainerStyle={styles.tabBarInner}>
+          {(['overview', 'security', 'forms', 'vitals', 'seo'] as Tab[]).map(t => (
             <Pressable key={t} style={[styles.tabBtn, tab === t && styles.tabActive]} onPress={() => setTab(t)}>
               <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>
-                {t.charAt(0).toUpperCase() + t.slice(1)}
+                {t === 'seo' ? 'SEO' : t.charAt(0).toUpperCase() + t.slice(1)}
               </Text>
             </Pressable>
           ))}
-        </View>
+        </ScrollView>
 
         {tab === 'overview' ? (
           <View style={styles.content}>
@@ -309,7 +317,7 @@ export default function SiteDetailScreen() {
               ))
             )}
           </View>
-        ) : (
+        ) : tab === 'vitals' ? (
           <View style={styles.content}>
             {vitalsLoading ? (
               <ActivityIndicator color={colors.accent} style={{ marginTop: spacing.xl }} />
@@ -341,6 +349,138 @@ export default function SiteDetailScreen() {
                   ))}
                 </View>
               ))
+            )}
+          </View>
+        ) : (
+          /* SEO tab */
+          <View style={styles.content}>
+            {seoLoading ? (
+              <ActivityIndicator color={colors.accent} style={{ marginTop: spacing.xl }} />
+            ) : (
+              <>
+                {/* Connection card */}
+                <View style={styles.card}>
+                  <View style={styles.cardHeader}>
+                    <Text style={styles.cardTitle}>Google Search Console</Text>
+                    {seoData?.connection?.status === 'active' && (
+                      <View style={styles.connectedChip}>
+                        <Text style={styles.connectedText}>CONNECTED</Text>
+                      </View>
+                    )}
+                  </View>
+                  {seoData?.connection ? (
+                    <>
+                      <View style={styles.infoRow}>
+                        <Text style={styles.infoLabel}>Account</Text>
+                        <Text style={styles.infoValue}>{seoData.connection.google_email}</Text>
+                      </View>
+                      <View style={styles.infoRow}>
+                        <Text style={styles.infoLabel}>Property</Text>
+                        <Text style={styles.infoValue} numberOfLines={1}>{seoData.connection.property_url}</Text>
+                      </View>
+                      {seoData.connection.status !== 'active' && (
+                        <Text style={{ color: colors.warning, fontSize: 13, marginTop: spacing.xs }}>
+                          Connection {seoData.connection.status}. Tap below to reconnect.
+                        </Text>
+                      )}
+                    </>
+                  ) : (
+                    <Text style={[styles.muted, { marginBottom: spacing.sm }]}>
+                      Connect your Google Search Console property to see clicks, impressions, and ranking data.
+                    </Text>
+                  )}
+                  <Pressable
+                    style={[styles.connectBtn, seoData?.connection?.status === 'active' && styles.connectBtnSecondary]}
+                    onPress={async () => {
+                      const result = await api<{ url: string }>(`/v1/sites/${id}/gsc/connect`)
+                      await Linking.openURL(result.url)
+                    }}
+                  >
+                    <Ionicons name="logo-google" size={16} color={colors.text} />
+                    <Text style={styles.connectBtnText}>
+                      {seoData?.connection?.status === 'active' ? 'Reconnect GSC' : 'Connect Google Search Console'}
+                    </Text>
+                  </Pressable>
+                </View>
+
+                {/* Traffic summary */}
+                {seoData?.summary && seoData.summary.last7Clicks > 0 && (
+                  <View style={styles.card}>
+                    <Text style={styles.cardTitle}>Traffic (last 7 days)</Text>
+                    <View style={styles.seoMetricRow}>
+                      <View style={styles.seoMetric}>
+                        <Text style={styles.seoMetricValue}>{seoData.summary.last7Clicks.toLocaleString()}</Text>
+                        <Text style={styles.seoMetricLabel}>Clicks</Text>
+                      </View>
+                      <View style={styles.seoMetricDivider} />
+                      <View style={styles.seoMetric}>
+                        {seoData.summary.clicksWoW != null ? (
+                          <>
+                            <Text style={[styles.seoMetricValue, { color: seoData.summary.clicksWoW >= 0 ? colors.up : colors.warning }]}>
+                              {seoData.summary.clicksWoW >= 0 ? '+' : ''}{seoData.summary.clicksWoW.toFixed(1)}%
+                            </Text>
+                            <Text style={styles.seoMetricLabel}>vs prev 7d</Text>
+                          </>
+                        ) : (
+                          <>
+                            <Text style={styles.seoMetricValue}>—</Text>
+                            <Text style={styles.seoMetricLabel}>vs prev 7d</Text>
+                          </>
+                        )}
+                      </View>
+                      <View style={styles.seoMetricDivider} />
+                      <View style={styles.seoMetric}>
+                        <Text style={styles.seoMetricValue}>{seoData.summary.prev7Clicks.toLocaleString()}</Text>
+                        <Text style={styles.seoMetricLabel}>Prev 7d</Text>
+                      </View>
+                    </View>
+                  </View>
+                )}
+
+                {/* Index status */}
+                {seoData?.indexStatus && (
+                  <View style={styles.card}>
+                    <Text style={styles.cardTitle}>Index coverage</Text>
+                    {[
+                      ['Indexed pages', String(seoData.indexStatus.indexed_count)],
+                      ['Excluded (noindex)', String(seoData.indexStatus.excluded_noindex)],
+                      ['Crawled, not indexed', String(seoData.indexStatus.crawled_not_indexed)],
+                      ['Server errors', String(seoData.indexStatus.server_errors)],
+                    ].map(([label, value]) => (
+                      <View key={label} style={styles.infoRow}>
+                        <Text style={styles.infoLabel}>{label}</Text>
+                        <Text style={styles.infoValue}>{value}</Text>
+                      </View>
+                    ))}
+                    <Text style={styles.seoDate}>Updated {new Date(seoData.indexStatus.date).toLocaleDateString()}</Text>
+                  </View>
+                )}
+
+                {/* Top queries */}
+                {seoData?.queries && seoData.queries.length > 0 && (
+                  <View style={styles.card}>
+                    <Text style={styles.cardTitle}>Top queries (last 7d)</Text>
+                    <View style={styles.queryHeader}>
+                      <Text style={[styles.infoLabel, { flex: 3 }]}>Query</Text>
+                      <Text style={[styles.infoLabel, { textAlign: 'right', width: 50 }]}>Clicks</Text>
+                      <Text style={[styles.infoLabel, { textAlign: 'right', width: 55 }]}>Position</Text>
+                    </View>
+                    {seoData.queries.slice(0, 15).map((q, i) => (
+                      <View key={i} style={[styles.queryRow, q.is_priority && styles.queryRowPriority]}>
+                        <Text style={[styles.queryText, { flex: 3 }]} numberOfLines={1}>{q.query}</Text>
+                        <Text style={[styles.queryNum, { width: 50 }]}>{q.clicks}</Text>
+                        <Text style={[styles.queryNum, { width: 55 }]}>{q.position?.toFixed(1) ?? '—'}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {!seoData?.connection && !seoLoading && (
+                  <View style={styles.card}>
+                    <Text style={styles.muted}>Connect GSC above to see traffic data.</Text>
+                  </View>
+                )}
+              </>
             )}
           </View>
         )}
@@ -419,7 +559,7 @@ const styles = StyleSheet.create({
   status:   { fontSize: 13, fontWeight: '700', color: colors.text },
   respTime: { fontSize: 13, color: colors.muted },
   uptimePct:{ fontSize: 12, fontWeight: '600' },
-  tabBar:   { flexDirection: 'row', backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border },
+  tabBar:   { backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border },
   tabBtn:   { flex: 1, paddingVertical: spacing.md, alignItems: 'center' },
   tabActive:{ borderBottomWidth: 2, borderBottomColor: colors.accent },
   tabText:  { fontSize: 14, fontWeight: '500', color: colors.muted },
@@ -454,4 +594,22 @@ const styles = StyleSheet.create({
   formPlugin: { fontSize: 11, color: colors.muted, marginBottom: 4 },
   scoreChip:  { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   scoreChipText: { fontSize: 14, fontWeight: '700', color: '#fff' },
+  tabBarInner: { flexDirection: 'row' },
+  // SEO tab styles
+  connectedChip:    { backgroundColor: '#14532d', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
+  connectedText:    { fontSize: 10, fontWeight: '700', color: '#86efac' },
+  connectBtn:       { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, backgroundColor: colors.accent, borderRadius: radius.sm, padding: spacing.sm, justifyContent: 'center', marginTop: spacing.sm },
+  connectBtnSecondary: { backgroundColor: colors.surface2 },
+  connectBtnText:   { fontSize: 13, fontWeight: '600', color: colors.text },
+  seoMetricRow:     { flexDirection: 'row', marginTop: spacing.sm },
+  seoMetric:        { flex: 1, alignItems: 'center', gap: 4 },
+  seoMetricDivider: { width: 1, backgroundColor: colors.border },
+  seoMetricValue:   { fontSize: 22, fontWeight: '700', color: colors.text },
+  seoMetricLabel:   { fontSize: 11, color: colors.muted },
+  seoDate:          { fontSize: 11, color: colors.dim, marginTop: spacing.xs },
+  queryHeader:      { flexDirection: 'row', paddingBottom: spacing.xs, borderBottomWidth: 1, borderBottomColor: colors.border, marginBottom: 2 },
+  queryRow:         { flexDirection: 'row', paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: colors.border },
+  queryRowPriority: { backgroundColor: '#1e1e3f' },
+  queryText:        { fontSize: 12, color: colors.text },
+  queryNum:         { fontSize: 12, color: colors.muted, textAlign: 'right' },
 })

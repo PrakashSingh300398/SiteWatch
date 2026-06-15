@@ -31,3 +31,4 @@ export const vulnQueue      = new Queue('vuln',      { connection: BULL_CONNECTI
 export const formsQueue     = new Queue('forms',     { connection: BULL_CONNECTION })
 export const vitalsQueue    = new Queue('vitals',    { connection: BULL_CONNECTION })
 export const digestQueue    = new Queue('digest',    { connection: BULL_CONNECTION })
+export const gscQueue       = new Queue('gsc',       { connection: BULL_CONNECTION })

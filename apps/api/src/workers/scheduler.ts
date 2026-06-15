@@ -1,6 +1,6 @@
 import { Worker } from 'bullmq'
 import { prisma } from '../lib/prisma'
-import { uptimeQueue, sslQueue, schedulerQueue, healthQueue, formsQueue, vitalsQueue, digestQueue, BULL_CONNECTION } from '../lib/queue'
+import { uptimeQueue, sslQueue, schedulerQueue, healthQueue, formsQueue, vitalsQueue, digestQueue, gscQueue, BULL_CONNECTION } from '../lib/queue'
 
 export async function startScheduler() {
   // Register the repeatable trigger — idempotent on restart
@@ -105,6 +105,19 @@ export async function startScheduler() {
             { jobId: `vitals:${site.id}:${weekSlot}` },
           )
         }
+      }
+
+      // ── GSC pull: once per calendar day for connected sites ───────────────
+      const gscSites = await prisma.gscConnection.findMany({
+        where: { status: 'active' },
+        select: { site_id: true },
+      })
+      for (const { site_id } of gscSites) {
+        await gscQueue.add(
+          'gsc.pull',
+          { siteId: site_id },
+          { jobId: `gsc:${site_id}:${todayStr}` },
+        )
       }
     },
     { connection: BULL_CONNECTION, concurrency: 1 },
