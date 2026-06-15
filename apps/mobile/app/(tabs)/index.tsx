@@ -1,17 +1,61 @@
 import React, { useState } from 'react'
 import {
   View, Text, FlatList, StyleSheet, RefreshControl,
-  TextInput, ActivityIndicator,
+  TextInput, ActivityIndicator, Pressable,
 } from 'react-native'
 import { router } from 'expo-router'
 import { useQuery } from '@tanstack/react-query'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { Ionicons } from '@expo/vector-icons'
 import { api } from '../../src/api/client'
 import { MetricCard } from '../../src/components/MetricCard'
 import { SiteListItem } from '../../src/components/SiteListItem'
 import { AlertItem } from '../../src/components/AlertItem'
 import { colors, spacing, radius } from '../../src/theme'
 import type { DashboardData, Site, Alert } from '../../src/api/types'
+
+const ONBOARDING_STEPS = [
+  { icon: 'download-outline' as const,      title: 'Install the plugin',   desc: 'Download the SiteWatch Agent plugin and install it on your WordPress site.' },
+  { icon: 'settings-outline' as const,      title: 'Add a site',           desc: 'Go to Settings → tap "Add site" → enter the site name and URL.' },
+  { icon: 'link-outline' as const,          title: 'Pair with the code',   desc: 'Copy the 6-character pairing code → paste it in Settings → SiteWatch Agent on your WP site.' },
+]
+
+function OnboardingCard() {
+  return (
+    <View style={obStyles.card}>
+      <Text style={obStyles.title}>Welcome to SiteWatch</Text>
+      <Text style={obStyles.sub}>Connect your first WordPress site in 3 steps.</Text>
+      {ONBOARDING_STEPS.map((step, i) => (
+        <View key={i} style={obStyles.step}>
+          <View style={obStyles.stepIcon}>
+            <Ionicons name={step.icon} size={22} color={colors.accent} />
+          </View>
+          <View style={obStyles.stepText}>
+            <Text style={obStyles.stepTitle}>{step.title}</Text>
+            <Text style={obStyles.stepDesc}>{step.desc}</Text>
+          </View>
+        </View>
+      ))}
+      <Pressable style={obStyles.btn} onPress={() => router.push('/(tabs)/settings' as never)}>
+        <Ionicons name="add" size={18} color={colors.text} />
+        <Text style={obStyles.btnText}>Add your first site</Text>
+      </Pressable>
+    </View>
+  )
+}
+
+const obStyles = StyleSheet.create({
+  card: { margin: spacing.md, backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg, gap: spacing.md },
+  title: { fontSize: 20, fontWeight: '700', color: colors.text },
+  sub: { fontSize: 14, color: colors.muted },
+  step: { flexDirection: 'row', gap: spacing.md, alignItems: 'flex-start' },
+  stepIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surface2, alignItems: 'center', justifyContent: 'center' },
+  stepText: { flex: 1, gap: 2 },
+  stepTitle: { fontSize: 15, fontWeight: '600', color: colors.text },
+  stepDesc: { fontSize: 13, color: colors.muted, lineHeight: 18 },
+  btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs, backgroundColor: colors.accent, borderRadius: radius.md, padding: spacing.md, marginTop: spacing.xs },
+  btnText: { color: colors.text, fontWeight: '600', fontSize: 15 },
+})
 
 export default function DashboardScreen() {
   const [search, setSearch] = useState('')
@@ -112,7 +156,7 @@ export default function DashboardScreen() {
         ListEmptyComponent={
           isLoading
             ? <ActivityIndicator style={{ marginTop: spacing.xl }} color={colors.accent} />
-            : <Text style={styles.empty}>No sites yet. Add one in Settings.</Text>
+            : <OnboardingCard />
         }
         style={styles.list}
       />

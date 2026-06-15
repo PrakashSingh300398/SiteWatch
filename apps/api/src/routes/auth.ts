@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import { prisma } from '../lib/prisma'
 import { redis } from '../lib/redis'
+import { sendResetEmail } from '../lib/email'
 
 const REFRESH_TTL_SEC = 30 * 24 * 60 * 60 // 30 days
 
@@ -24,6 +25,15 @@ const loginBody = z.object({
 
 const refreshBody = z.object({
   refreshToken: z.string(),
+})
+
+const forgotBody = z.object({
+  email: z.string().email(),
+})
+
+const resetBody = z.object({
+  token: z.string().uuid(),
+  password: z.string().min(8).max(100),
 })
 
 // ─── Token helpers ────────────────────────────────────────────────────────────
@@ -125,6 +135,37 @@ export default async function authRoutes(fastify: FastifyInstance) {
       refreshToken,
       user: { id: user.id, email, role: user.role, orgId: user.org_id },
     })
+  })
+
+  // POST /v1/auth/forgot-password
+  fastify.post('/v1/auth/forgot-password', async (req, reply) => {
+    const parsed = forgotBody.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: parsed.error.flatten() })
+
+    // Always return 200 to prevent email enumeration
+    const user = await prisma.user.findUnique({ where: { email: parsed.data.email } })
+    if (user) {
+      const token = randomUUID()
+      await redis.set(`pwd-reset:${token}`, user.id, 'EX', 3600) // 1 hour
+      await sendResetEmail(user.email, token)
+    }
+    return reply.send({ message: 'If that email exists, a reset link has been sent.' })
+  })
+
+  // POST /v1/auth/reset-password
+  fastify.post('/v1/auth/reset-password', async (req, reply) => {
+    const parsed = resetBody.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: parsed.error.flatten() })
+
+    const { token, password } = parsed.data
+    const userId = await redis.get(`pwd-reset:${token}`)
+    if (!userId) return reply.status(400).send({ error: 'Reset token is invalid or expired' })
+
+    const password_hash = await bcrypt.hash(password, 12)
+    await prisma.user.update({ where: { id: userId }, data: { password_hash } })
+    await redis.del(`pwd-reset:${token}`)
+
+    return reply.send({ message: 'Password updated. Please sign in.' })
   })
 
   // POST /v1/auth/refresh — rotating refresh tokens

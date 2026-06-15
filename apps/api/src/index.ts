@@ -14,6 +14,7 @@ import eventsRoutes from './routes/events'
 import teamRoutes from './routes/team'
 import gscRoutes from './routes/gsc'
 import aiRoutes from './routes/ai'
+import notificationsRoutes from './routes/notifications'
 import devRoutes from './routes/dev'
 import { startWorkers } from './workers/index'
 
@@ -58,6 +59,7 @@ async function main() {
   await app.register(teamRoutes)
   await app.register(gscRoutes)
   await app.register(aiRoutes)
+  await app.register(notificationsRoutes)
   await app.register(devRoutes)
 
   // ── Healthcheck ────────────────────────────────────────────────────────────

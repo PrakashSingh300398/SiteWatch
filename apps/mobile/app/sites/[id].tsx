@@ -366,7 +366,7 @@ export default function SiteDetailScreen() {
               ))
             )}
           </View>
-        ) : (
+        ) : tab === 'seo' ? (
           /* SEO tab */
           <View style={styles.content}>
             {seoLoading ? (

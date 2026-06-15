@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import {
   View, Text, StyleSheet, Pressable, Modal,
-  TextInput, ActivityIndicator, ScrollView, Alert,
+  TextInput, ActivityIndicator, ScrollView, Alert, Switch,
 } from 'react-native'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -35,6 +35,15 @@ interface Invitation {
 interface TeamData {
   members: TeamMember[]
   invitations: Invitation[]
+}
+
+interface NotifPrefs {
+  push_critical: boolean
+  push_warning:  boolean
+  push_info:     boolean
+  quiet_start:   number | null
+  quiet_end:     number | null
+  quiet_tz:      string
 }
 
 export default function SettingsScreen() {
@@ -98,6 +107,23 @@ export default function SettingsScreen() {
     mutationFn: (memberId: string) => api(`/v1/team/${memberId}`, { method: 'DELETE' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['team'] }),
   })
+
+  const { data: prefsData } = useQuery({
+    queryKey: ['notif-prefs'],
+    queryFn: () => api<{ prefs: NotifPrefs }>('/v1/notifications/prefs'),
+  })
+
+  const prefsMutation = useMutation({
+    mutationFn: (patch: Partial<NotifPrefs>) =>
+      api<{ prefs: NotifPrefs }>('/v1/notifications/prefs', {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['notif-prefs'] }),
+  })
+
+  const prefs = prefsData?.prefs
+  const togglePref = (key: keyof NotifPrefs, val: boolean) => prefsMutation.mutate({ [key]: val })
 
   const resetModal = () => {
     setShowAdd(false)
@@ -234,6 +260,58 @@ export default function SettingsScreen() {
             </View>
           </>
         )}
+
+        {/* Notifications */}
+        <Text style={styles.sectionTitle}>Notifications</Text>
+        <View style={styles.card}>
+          {([
+            ['push_critical', 'Critical alerts', 'Outages, PHP files, vuln plugins'],
+            ['push_warning',  'Warning alerts',  'SSL expiry, traffic drops, forms stopped'],
+            ['push_info',     'Info alerts',      'Plugin updates, login activity'],
+          ] as [keyof NotifPrefs, string, string][]).map(([key, label, sub], i) => (
+            <React.Fragment key={key}>
+              {i > 0 && <View style={styles.divider} />}
+              <View style={styles.row}>
+                <View style={styles.siteInfo}>
+                  <Text style={styles.rowText}>{label}</Text>
+                  <Text style={styles.siteUrl}>{sub}</Text>
+                </View>
+                <Switch
+                  value={prefs ? (prefs[key] as boolean) : true}
+                  onValueChange={val => isOwner && togglePref(key, val)}
+                  thumbColor={colors.text}
+                  trackColor={{ false: colors.border, true: colors.accent }}
+                  disabled={!isOwner}
+                />
+              </View>
+            </React.Fragment>
+          ))}
+          <View style={styles.divider} />
+          <View style={styles.row}>
+            <View style={styles.siteInfo}>
+              <Text style={styles.rowText}>Quiet hours</Text>
+              <Text style={styles.siteUrl}>
+                {prefs?.quiet_start != null && prefs?.quiet_end != null
+                  ? `${String(prefs.quiet_start).padStart(2, '0')}:00 – ${String(prefs.quiet_end).padStart(2, '0')}:00 (${prefs.quiet_tz})`
+                  : 'Disabled — push any time'}
+              </Text>
+            </View>
+            {isOwner && (
+              <Pressable onPress={() => Alert.alert(
+                'Quiet hours',
+                'Set the hour window (0–23) when non-critical push notifications are silenced.',
+                [
+                  { text: 'Disable', onPress: () => prefsMutation.mutate({ quiet_start: null, quiet_end: null }) },
+                  { text: '22:00 – 07:00', onPress: () => prefsMutation.mutate({ quiet_start: 22, quiet_end: 7 }) },
+                  { text: '23:00 – 07:00', onPress: () => prefsMutation.mutate({ quiet_start: 23, quiet_end: 7 }) },
+                  { text: 'Cancel', style: 'cancel' },
+                ],
+              )}>
+                <Ionicons name="chevron-forward" size={18} color={colors.dim} />
+              </Pressable>
+            )}
+          </View>
+        </View>
 
       </ScrollView>
 

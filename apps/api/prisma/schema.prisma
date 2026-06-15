@@ -64,6 +64,7 @@ model Organization {
   plan           OrgPlan   @default(starter)
   digest_hour    Int       @default(8)
   last_digest_at DateTime?
+  notif_prefs    Json      @default("{\"push_critical\":true,\"push_warning\":true,\"push_info\":false,\"quiet_start\":null,\"quiet_end\":null,\"quiet_tz\":\"UTC\"}")
   created_at     DateTime  @default(now())
 
   users       User[]
