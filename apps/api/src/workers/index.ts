@@ -9,6 +9,7 @@ import { startVitalsWorker }  from './vitals'
 import { startDigestWorker }  from './digest'
 import { startGscWorker }     from './gsc'
 import { startCrawlWorker }   from './crawl'
+import { startAiWorker }      from './ai'
 
 export async function startWorkers() {
   const uptimeWorker    = startUptimeWorker()
@@ -22,8 +23,9 @@ export async function startWorkers() {
   const digestWorker    = startDigestWorker()
   const gscWorker       = startGscWorker()
   const crawlWorker     = startCrawlWorker()
+  const aiWorker        = startAiWorker()
 
-  console.log('[workers] uptime, ssl, scheduler, events, health, vuln, forms, vitals, digest, gsc, crawl started')
+  console.log('[workers] uptime, ssl, scheduler, events, health, vuln, forms, vitals, digest, gsc, crawl, ai started')
 
-  return { uptimeWorker, sslWorker, schedulerWorker, eventsWorker, healthWorker, vulnWorker, formsWorker, vitalsWorker, digestWorker, gscWorker, crawlWorker }
+  return { uptimeWorker, sslWorker, schedulerWorker, eventsWorker, healthWorker, vulnWorker, formsWorker, vitalsWorker, digestWorker, gscWorker, crawlWorker, aiWorker }
 }

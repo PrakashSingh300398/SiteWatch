@@ -11,9 +11,9 @@ import { UptimeChart, ResponseSparkline } from '../../src/components/UptimeChart
 import { ScoreGauge } from '../../src/components/ScoreGauge'
 import { StatusDot } from '../../src/components/StatusDot'
 import { colors, spacing, radius, severityColor } from '../../src/theme'
-import type { SiteDetail, UptimeCheck, SiteEvent, Plugin, FormMonitorRecord, WebVitalsRecord, WpUserRecord, SeoData, SeoAuditData } from '../../src/api/types'
+import type { SiteDetail, UptimeCheck, SiteEvent, Plugin, FormMonitorRecord, WebVitalsRecord, WpUserRecord, SeoData, SeoAuditData, AiData } from '../../src/api/types'
 
-type Tab = 'overview' | 'security' | 'forms' | 'vitals' | 'seo'
+type Tab = 'overview' | 'security' | 'forms' | 'vitals' | 'seo' | 'ai'
 
 export default function SiteDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
@@ -77,6 +77,13 @@ export default function SiteDetailScreen() {
       enabled: tab === 'seo',
     })
 
+  const { data: aiData, isLoading: aiLoading, refetch: refetchAi } =
+    useQuery({
+      queryKey: ['ai', id],
+      queryFn: () => api<AiData>(`/v1/sites/${id}/ai`),
+      enabled: tab === 'ai',
+    })
+
   const usersData = site?.wp_users ?? []
 
   const site    = siteData?.site
@@ -95,6 +102,7 @@ export default function SiteDetailScreen() {
       tab === 'forms'    && refetchForms(),
       tab === 'vitals'   && refetchVitals(),
       tab === 'seo'      && Promise.all([refetchSeo(), refetchAudit()]),
+      tab === 'ai'       && refetchAi(),
     ])
   }
 
@@ -133,10 +141,10 @@ export default function SiteDetailScreen() {
 
         {/* Tab bar */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabBar} contentContainerStyle={styles.tabBarInner}>
-          {(['overview', 'security', 'forms', 'vitals', 'seo'] as Tab[]).map(t => (
+          {(['overview', 'security', 'forms', 'vitals', 'seo', 'ai'] as Tab[]).map(t => (
             <Pressable key={t} style={[styles.tabBtn, tab === t && styles.tabActive]} onPress={() => setTab(t)}>
               <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>
-                {t === 'seo' ? 'SEO' : t.charAt(0).toUpperCase() + t.slice(1)}
+                {t === 'seo' ? 'SEO' : t === 'ai' ? 'AI' : t.charAt(0).toUpperCase() + t.slice(1)}
               </Text>
             </Pressable>
           ))}
@@ -559,6 +567,73 @@ export default function SiteDetailScreen() {
               </>
             )}
           </View>
+        ) : (
+          /* AI tab */
+          <View style={styles.content}>
+            {aiLoading ? (
+              <ActivityIndicator color={colors.accent} style={{ marginTop: spacing.xl }} />
+            ) : (
+              <>
+                {/* Readiness score */}
+                <View style={styles.card}>
+                  <View style={styles.cardHeader}>
+                    <Text style={styles.cardTitle}>AI Readiness Score</Text>
+                    <View style={[styles.scoreChip, { backgroundColor: scoreColor(aiData?.readiness.score ?? 0) }]}>
+                      <Text style={styles.scoreChipText}>{aiData?.readiness.score ?? '—'}</Text>
+                    </View>
+                  </View>
+                  <Text style={[styles.muted, { marginBottom: spacing.xs }]}>
+                    How well-optimised your site is for AI crawlers and LLM citations.
+                  </Text>
+                  {Object.entries(aiData?.readiness.breakdown ?? {}).map(([key, b]) => (
+                    <View key={key} style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>{b.label}</Text>
+                      <View style={styles.readinessRight}>
+                        <View style={[styles.readinessDot, { backgroundColor: b.earned > 0 ? colors.up : colors.muted }]} />
+                        <Text style={[styles.infoValue, { color: b.earned > 0 ? colors.up : colors.muted }]}>
+                          {b.earned}/{b.max}
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+
+                {/* AI crawler hits */}
+                <View style={styles.card}>
+                  <Text style={styles.cardTitle}>AI Crawler Traffic (last 30d)</Text>
+                  {Object.keys(aiData?.botTotals ?? {}).length === 0 ? (
+                    <Text style={styles.muted}>No AI crawler visits detected yet.</Text>
+                  ) : (
+                    Object.entries(aiData?.botTotals ?? {})
+                      .sort(([, a], [, b]) => b - a)
+                      .map(([bot, hits]) => (
+                        <View key={bot} style={styles.infoRow}>
+                          <Text style={styles.infoLabel}>{bot}</Text>
+                          <Text style={styles.infoValue}>{hits.toLocaleString()} hits</Text>
+                        </View>
+                      ))
+                  )}
+                </View>
+
+                {/* AI referral sessions */}
+                <View style={styles.card}>
+                  <Text style={styles.cardTitle}>AI Referral Sessions (last 30d)</Text>
+                  {Object.keys(aiData?.sourceTotals ?? {}).length === 0 ? (
+                    <Text style={styles.muted}>No AI referral sessions recorded. Connect GA4 to enable.</Text>
+                  ) : (
+                    Object.entries(aiData?.sourceTotals ?? {})
+                      .sort(([, a], [, b]) => b - a)
+                      .map(([source, sessions]) => (
+                        <View key={source} style={styles.infoRow}>
+                          <Text style={styles.infoLabel}>{source}</Text>
+                          <Text style={styles.infoValue}>{sessions.toLocaleString()} sessions</Text>
+                        </View>
+                      ))
+                  )}
+                </View>
+              </>
+            )}
+          </View>
         )}
       </ScrollView>
     </>
@@ -712,4 +787,6 @@ const styles = StyleSheet.create({
   issueChip:        { backgroundColor: '#422006', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
   issueChipCritical:{ backgroundColor: '#7f1d1d' },
   issueChipText:    { fontSize: 10, fontWeight: '600', color: '#fca5a5' },
+  readinessRight:   { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  readinessDot:     { width: 8, height: 8, borderRadius: 4 },
 })

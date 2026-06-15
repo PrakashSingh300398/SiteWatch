@@ -13,6 +13,7 @@ import alertsRoutes from './routes/alerts'
 import eventsRoutes from './routes/events'
 import teamRoutes from './routes/team'
 import gscRoutes from './routes/gsc'
+import aiRoutes from './routes/ai'
 import { startWorkers } from './workers/index'
 
 const isProd = process.env.NODE_ENV === 'production'
@@ -55,6 +56,7 @@ async function main() {
   await app.register(eventsRoutes)
   await app.register(teamRoutes)
   await app.register(gscRoutes)
+  await app.register(aiRoutes)
 
   // ── Healthcheck ────────────────────────────────────────────────────────────
   app.get('/health', async (_req, reply) => {
@@ -90,6 +92,7 @@ async function main() {
       workers.vulnWorker.close(),
       workers.gscWorker.close(),
       workers.crawlWorker.close(),
+      workers.aiWorker.close(),
     ])
     await app.close()
     await prisma.$disconnect()

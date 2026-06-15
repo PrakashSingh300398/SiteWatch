@@ -122,6 +122,34 @@ export interface WebVitalsRecord {
   measured_at: string
 }
 
+export interface AiReadinessBreakdown {
+  earned: number
+  max: number
+  label: string
+}
+
+export interface AiData {
+  readiness: {
+    score: number
+    breakdown: Record<string, AiReadinessBreakdown>
+  }
+  botTotals: Record<string, number>
+  sourceTotals: Record<string, number>
+  crawlerStats: Array<{ date: string; bot: string; hits: number }>
+  referralStats: Array<{ date: string; source: string; sessions: number }>
+}
+
+export interface AiInsight {
+  id: string
+  alert_id: string | null
+  kind: string
+  model: string
+  content: string
+  created_at: string
+  prompt_tokens: number | null
+  completion_tokens: number | null
+}
+
 export interface SeoAuditSummary {
   crawled_at: string
   score: number | null

@@ -20,7 +20,10 @@ export default async function alertsRoutes(fastify: FastifyInstance) {
       where: { org_id: orgId, ...resolvedFilter },
       orderBy: { created_at: 'desc' },
       take: 100,
-      include: { site: { select: { id: true, name: true, url: true } } },
+      include: {
+        site: { select: { id: true, name: true, url: true } },
+        ai_insights: { where: { kind: 'brief' }, select: { content: true, model: true, created_at: true }, take: 1 },
+      },
     })
     return reply.send({ alerts })
   })

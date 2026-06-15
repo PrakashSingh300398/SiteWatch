@@ -33,3 +33,4 @@ export const vitalsQueue    = new Queue('vitals',    { connection: BULL_CONNECTI
 export const digestQueue    = new Queue('digest',    { connection: BULL_CONNECTION })
 export const gscQueue       = new Queue('gsc',       { connection: BULL_CONNECTION })
 export const seoCrawlQueue  = new Queue('seoCrawl',  { connection: BULL_CONNECTION })
+export const aiQueue        = new Queue('ai',        { connection: BULL_CONNECTION })

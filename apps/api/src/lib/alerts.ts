@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client'
 import { $Enums } from '@prisma/client'
 import { sendPushToOrg } from './push'
+import { aiQueue } from './queue'
 
 type AlertSeverity = $Enums.AlertSeverity
 
@@ -45,6 +46,12 @@ export async function createAlert(db: PrismaClient, opts: CreateAlertOpts) {
       siteId,
       rule,
     })
+    // Dispatch AI brief async — never blocks alert delivery
+    aiQueue.add('ai.brief', { alertId: alert.id }, {
+      jobId: `aibrief-${alert.id}`,
+      attempts: 2,
+      backoff: { type: 'fixed', delay: 5_000 },
+    }).catch(err => console.warn('[alerts] ai.brief enqueue failed:', err))
   }
 
   return alert
